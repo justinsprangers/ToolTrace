@@ -15,21 +15,17 @@ It works in three steps (tabs at the top).
    - Shiny or pale parts are missed: lower **Sensitivity**.
    - Tools merge together: lower **Bridge gaps**.
    - On a mat, **Remove thin lines** wipes out the grid. Leave it at 0 on paper, because it also blunts sharp tips.
-4. **Fix up** with the tools above the Trace view. They work like LaserEngraver's fix tools.
-   - **Smart keep (K):** paint over a part that was missed. It spreads to nearby pixels of the same colour and only ever adds.
-   - **Smart remove (R):** paint over something wrongly included, e.g. the mat between snip handles. It spreads to the same colour and only ever removes.
-   - **Smart colour match** and **Smart reach** control how far a smart stroke spreads.
-   - **Brush keep / Brush erase (B / E):** change exactly the pixels you paint.
-   - **[ ]** change the brush size, **Ctrl+Z / Ctrl+Y** undo and redo. Strokes are drawn faintly in their tool colour.
+4. **Fix up** with the brushes above the Trace view: **Brush keep / Brush erase (B / E)** add or remove exactly what you paint (e.g. the mat between snip handles). **[ ]** change the brush size, **Ctrl+Z / Ctrl+Y** undo and redo.
 5. **Shapes:** every traced shape becomes an outline made of **nodes**: square = corner (sharp), round = smooth (the outline curves through it).
-   - The **Shapes** list shows every shape. Untick one (or select it and press **X**) to leave it out.
+   - The **Shapes** list shows every shape. To leave one out, untick it, or select it and press **Delete** (or the **Exclude shape** button). Press it again to bring the shape back.
+   - **Symmetric:** for a symmetric tool, tick this on the selected shape. The mirror axis is found automatically (pink line). The two halves are averaged, so small differences from the photo even out, and the nodes are mirrored, so the outline is exactly symmetric. A node you edit is mirrored to the other side when you let go.
    - Click a shape (**Select** tool, **V**) to select it and show its nodes.
    - **Edit the nodes:**
      - Drag a node to move it.
      - Click the outline to add a node.
      - Double-click a node (or **C**) to switch it between corner and smooth.
      - **L** makes the segment after the selected node an exact straight line.
-     - **Delete** removes a node.
+     - **Delete** removes the selected node. With no node selected, it excludes the shape.
    - **Own outline settings** gives the selected shape its own Smooth / Snap / Corner / Node detail, without touching the others. **Re-fit nodes** throws away hand edits.
    - Hand edits and per-shape settings survive re-tracing (changing Sensitivity, brush fixes, etc.).
    - **Outline settings for all shapes** (in the Shapes section) are the defaults:
@@ -46,7 +42,12 @@ Press **?** (or **Shortcuts** above the picture) for every keyboard shortcut.
 - Drag it to move it, and drag the round handle to rotate (hold Shift to snap to 15°).
 - Keys: arrow keys nudge it (Shift for bigger steps), R rotates 90°, Ctrl+D duplicates, Delete removes it, Ctrl+Z / Ctrl+Y undo and redo.
 - **Selected** panel: pocket depth, exact rotation, Straighten (smallest box), Flip (tool lying the other side up), Duplicate, Remove.
-- **Finger notches:** pick **Notch** above the picture and click to add one. Click a notch again to remove it. Each notch has its own diameter and depth.
+- **Finger notches:** pick **Notch** (N) above the picture.
+  - A dashed circle previews where the notch will go. Near a tool it snaps onto the tool's outline (hold **Alt** to place it freely).
+  - A snapped notch belongs to that tool: it moves, rotates and flips with it, and is never deeper than the tool's pocket.
+  - If the tool has a symmetry axis (from **Symmetric** in Capture, or **Add symmetry axis** in the Selected panel), a mirrored twin is added on the other side. Untick **Mirror across the tool's symmetry axis** to place single notches.
+  - Click a notch to remove it (and its twin). Drag notches in Select mode; a twin follows.
+  - The bin grows to fit notches near its edge.
 - **Bin:** **Clearance** is the gap around every tool (1 mm is a good start), and **Min wall** is the minimum material left at the bin edge. With **Fit bin to the tools automatically** on, the bin size follows the tools. Turn it off to set the units yourself.
 - The library and layout are saved in your browser automatically. Use **Save project / Open project** (top right) to back them up or move them to another computer.
 

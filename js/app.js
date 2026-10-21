@@ -1244,7 +1244,7 @@
         var hn = hitNotch(p);
         if (hn) removeNotch(hn); else addNotch(notchTarget(p, e.altKey));
         S.notchPrev = null;
-        layoutChanged(false);
+        layoutChanged(true); // notches near the edge may need a bigger bin
         return;
       }
       var it = selItem();
