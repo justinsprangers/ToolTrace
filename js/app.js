@@ -1664,6 +1664,15 @@
   TT.app = {
     S: S, L: L, C: C, runFrom: runFrom, setPhase: setPhase, addItem: addItem, generate: generate, fitGrid: fitGrid,
     selectShape: selectShape, draw: draw,
+    // For the tutorial: copy the bin, and put a copy back (also removes library shapes by id).
+    layoutState: function () { return JSON.parse(JSON.stringify(L)); },
+    restore: function (state, dropIds) {
+      (dropIds || []).forEach(function (id) { delete S.lib[id]; delete S.libTick[id]; });
+      S.libOrder = S.libOrder.filter(function (id) { return S.lib[id]; });
+      if (state) Object.keys(state).forEach(function (k) { L[k] = state[k]; });
+      S.sel = null; S.selNotch = null;
+      syncLayoutInputs(); renderLib(); invalidate(); save(); syncSel(); describeLayout(); layoutSnapshot(); draw();
+    },
     setCapView: function (v) { S.capView = v; toolbar(); draw(); },
     setLayTool: function (t) { S.layTool = t; toolbar(); draw(); }
   };

@@ -95,13 +95,13 @@ var TT = window.TT = window.TT || {};
       '<ul><li>Set the pocket depth (how deep the tool sits).</li><li><b>Add selected</b>: one shape, under its own name.</li><li><b>Add all ticked</b>: every shape, named “prefix + shape name”.</li></ul>' +
       '<div class="tour-acts"><button class="b" data-act="addall">Add all for me</button></div>', phase: 'capture' },
     { target: 'details[data-key=lib]', title: 'Layout: the library', before: function () {
-      if (!A().S.libOrder.length && hasShapes()) $('addShapes').click();
+      if (!tourIds().length && hasShapes()) $('addShapes').click();
       A().setPhase('layout');
     }, html:
       '<ul><li><b>Add</b> puts a shape in the bin.</li><li>Tick several and <b>Delete ticked</b> to clean up.</li></ul>', phase: 'layout' },
     { target: '#cv', title: 'Arrange the bin', before: function () {
       A().setPhase('layout'); A().setLayTool('select');
-      if (!A().L.items.length && A().S.libOrder.length) A().S.libOrder.slice(0, 2).forEach(function (id) { A().addItem(id); });
+      tourBin();
     }, html:
       '<ul><li>Drag a tool to move it; drag its round handle to rotate (<kbd>Shift</kbd> snaps 15°).</li><li>Arrows nudge, <kbd>R</kbd> rotates 90°, <kbd>Delete</kbd> removes.</li><li>The bin grows to fit (42 mm Gridfinity cells).</li></ul>', phase: 'layout' },
     { target: 'details[data-key=bin]', title: 'Bin settings', html:
@@ -110,14 +110,31 @@ var TT = window.TT = window.TT || {};
       '<ul><li>With <b>Notch</b> (N) on, a dashed preview follows the mouse and snaps to tool edges.</li><li>Circle or slot; symmetric tools get a mirrored twin.</li><li>Click a notch in Select mode, then <kbd>Delete</kbd> to remove it.</li></ul>', phase: 'layout' },
     { target: 'details[data-key=model]', title: 'Generate: the model', before: function () { A().setLayTool('select'); A().setPhase('generate'); }, html:
       '<ul><li>Height comes from the deepest pocket.</li><li><b>Pocket edge chamfer</b> bevels the pocket tops so tools drop in.</li><li><b>Max units per print</b>: 6 fits a 256 mm bed; bigger bins are split.</li></ul>', phase: 'generate' },
-    { target: '#cv', title: '3D preview', before: function () { A().setPhase('generate'); if (A().L.items.length && !A().S.gen) A().generate(); }, wait: 1500, html:
+    { target: '#cv', title: '3D preview', before: function () { tourBin(); A().setPhase('generate'); if (A().L.items.length && !A().S.gen) A().generate(); }, wait: 1500, html:
       '<ul><li><b>Generate model</b> builds it and checks the mesh.</li><li>Drag to turn, scroll to zoom.</li></ul>', phase: 'generate' },
     { target: 'details[data-key=dl]', title: 'Download', html:
       '<ul><li>One STL per printable piece, sizes in mm and inches.</li><li>Also a 1:1 SVG of the pockets (for laser-cut foam).</li></ul>', phase: 'generate' },
     { title: 'You’re set', html:
       '<ul><li><b>Save project</b> backs up your library and layout.</li><li>Press <kbd>?</kbd> for every keyboard shortcut.</li><li><b>Tutorial</b> (top right) replays this tour.</li></ul>' +
-      '<p class="tour-note" id="tourSampleNote" hidden>The sample tools are in your library; tick them in Layout and press <b>Delete ticked</b> to remove them.</p>' }
+      '<p class="tour-note">Your own bin comes back when the tour ends' + '<span id="tourSampleNote" hidden>, and the sample tools are removed from the library</span>.</p>' }
   ];
+
+  // The tour works on its own bin: the tools added to the library during this run (the sample's,
+  // or the user's own photo), never what was already there. The user's bin and library are put
+  // back when the tour ends.
+  var saved = null; // {layout, libBefore: {id: 1}}
+  function tourIds() {
+    if (!saved) return [];
+    return A().S.libOrder.filter(function (id) { return !saved.libBefore[id]; });
+  }
+  function tourBin() {
+    var ids = tourIds(), L = A().L, inBin = {};
+    L.items.forEach(function (it) { inBin[it.shapeId] = 1; });
+    var ok = ids.length && L.items.length === ids.length && ids.every(function (id) { return inBin[id]; });
+    if (ok) return;
+    L.items = []; L.notches = []; L.autoSize = true;
+    ids.forEach(function (id) { A().addItem(id); });
+  }
 
   // ---------- Engine ----------
 
@@ -215,6 +232,9 @@ var TT = window.TT = window.TT || {};
   function start() {
     if (!hi) build();
     usedSample = false;
+    var before = {};
+    A().S.libOrder.forEach(function (id) { before[id] = 1; });
+    saved = { layout: A().layoutState(), libBefore: before };
     TT.tourOpen = true;
     document.body.classList.add('touring');
     hi.hidden = card.hidden = dim.hidden = false;
@@ -225,6 +245,11 @@ var TT = window.TT = window.TT || {};
     TT.tourOpen = false;
     document.body.classList.remove('touring');
     if (hi) hi.hidden = card.hidden = dim.hidden = true;
+    // Put the user's bin back; drop the sample tools (shapes from their own photo stay).
+    if (saved) {
+      A().restore(saved.layout, usedSample ? tourIds() : []);
+      saved = null;
+    }
     try { localStorage.setItem('tooltrace.tourDone', '1'); } catch (e) { /* ignore */ }
   }
 
