@@ -2,7 +2,7 @@
 
 Turn photos of your tools into Gridfinity bins with a pocket shaped like each tool. Works offline: double-click `index.html`. Nothing to install.
 
-It works in three steps (tabs at the top).
+It works in three steps (tabs at the top). New to it? Press **Tutorial** (top right; it also opens by itself the first time). It walks through every step, and can load a built-in sample photo so you can try everything without a photo of your own. Arrow keys or Enter go forward and back, and Esc ends it.
 
 ## 1. Capture: photo → outlines
 1. **Photo:** choose a photo of one or more tools lying flat.
@@ -82,6 +82,7 @@ Press **?** (or **Shortcuts** above the picture) for every keyboard shortcut.
 - `js/preview3d.js`: 3D preview (software z-buffer).
 - `js/earcut.js`: polygon triangulation (port of mapbox/earcut, ISC license).
 - `js/app.js`: the UI.
+- `js/tour.js`: the tutorial and the built-in sample photo.
 
 ## License
 MIT (see `LICENSE`). `js/earcut.js` is a port of mapbox/earcut (ISC).

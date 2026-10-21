@@ -73,6 +73,22 @@
   details summary { cursor: pointer; font-weight: 600; }
   details li { margin: 4px 0; }
   .downloads { display: flex; flex-direction: column; gap: 6px; }
+  /* Tutorial: a spotlight (huge shadow around the target) and a card */
+  #tourDim { position: fixed; inset: 0; z-index: 49; background: rgba(20,20,20,.5); pointer-events: none; }
+  #tourHi { position: fixed; z-index: 50; border-radius: 8px; pointer-events: none; box-shadow: 0 0 0 3px #1c7ed6; }
+  #tourDim[hidden] { display: none; }
+  #tourCard { position: fixed; z-index: 51; width: 340px; background: var(--panel); border-radius: 10px; padding: 14px 16px 12px; box-shadow: 0 10px 30px rgba(0,0,0,.3); transition: left .25s ease, top .25s ease; }
+  #tourCard[hidden], #tourHi[hidden] { display: none; }
+  #tourCard h3 { margin: 2px 0 6px; font-size: 16px; }
+  #tourCard .tour-step { font-size: 12px; color: var(--mute); }
+  #tourCard .tour-body { font-size: 13.5px; }
+  #tourCard .tour-body ul, #tourCard .tour-body ol { margin: 6px 0; padding-left: 20px; }
+  #tourCard .tour-body li { margin: 3px 0; }
+  #tourCard .tour-body p { margin: 6px 0; }
+  .tour-acts { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .tour-nav { display: flex; gap: 6px; align-items: center; margin-top: 10px; }
+  .tour-nav span { flex: 1; }
+  .tour-note { color: var(--mute); font-size: 12.5px; }
   /* Collapsible sections */
   details.sec { border-bottom: 1px solid var(--line); padding: 4px 0 10px; }
   details.sec[hidden] { display: none; }
@@ -131,6 +147,7 @@
     <button data-phase="generate"><b>3</b>Generate</button>
   </div>
   <div class="spacer"></div>
+  <button class="b" id="tourBtn" title="A guided walk-through of the whole tool">Tutorial</button>
   <button class="b" id="saveProject">Save project</button>
   <button class="b" id="openProject">Open project</button>
   <input type="file" id="projectFile" accept=".json,application/json" hidden>
@@ -386,5 +403,6 @@
 <script src="js/gridfinity.js"></script>
 <script src="js/preview3d.js"></script>
 <script src="js/app.js"></script>
+<script src="js/tour.js"></script>
 </body>
 </html>

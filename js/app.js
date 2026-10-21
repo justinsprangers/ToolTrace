@@ -1661,5 +1661,10 @@
 
   try { var stored = localStorage.getItem('tooltrace.v2'); if (stored) load(JSON.parse(stored)); } catch (e) { /* storage unavailable or corrupt */ }
   syncLayoutInputs(); renderLib(); describeLayout(); layoutSnapshot(); toolbar(); draw();
-  TT.app = { S: S, L: L, C: C, runFrom: runFrom, setPhase: setPhase, addItem: addItem, generate: generate, fitGrid: fitGrid };
+  TT.app = {
+    S: S, L: L, C: C, runFrom: runFrom, setPhase: setPhase, addItem: addItem, generate: generate, fitGrid: fitGrid,
+    selectShape: selectShape, draw: draw,
+    setCapView: function (v) { S.capView = v; toolbar(); draw(); },
+    setLayTool: function (t) { S.layTool = t; toolbar(); draw(); }
+  };
 })();
