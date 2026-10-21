@@ -16,7 +16,7 @@
     lib: {}, libOrder: [], sel: null, gen: null, preview: null,
     views: {}, drag: null, pending: {}
   };
-  var L = { nx: 2, ny: 1, clearance: 1, wall: 2, floor: 1.2, units: 3, autoUnits: true, maxUnits: 6, autoSize: true, items: [], notches: [] };
+  var L = { nx: 2, ny: 1, clearance: 1, wall: 2, floor: 1.2, units: 3, autoUnits: true, maxUnits: 6, autoSize: true, chamfer: 1, items: [], notches: [] };
 
   // ---------- Small helpers ----------
 
@@ -561,7 +561,9 @@
   ctl('binCtls', 'wall', 'Min wall', 0, 10, 0.5, L.wall, 'mm', function (v) { L.wall = v; layoutChanged(true); });
   ctl('selCtls', 'selDepth', 'Pocket depth', 0.5, 80, 0.5, 15, 'mm', function (v) { var it = selItem(); if (it) { it.depth = v; layoutChanged(); } });
   ctl('selCtls', 'selRot', 'Rotation', -180, 180, 0.5, 0, '°', function (v) { var it = selItem(); if (it) { it.rot = v; layoutChanged(); } });
-  ctl('notchCtls', 'notchD', 'Diameter', 8, 50, 1, 22, 'mm', function () { draw(); });
+  ctl('notchCtls', 'notchD', 'Width (diameter)', 8, 50, 1, 22, 'mm', function () { draw(); });
+  ctl('slotCtl', 'notchLen', 'Slot length', 15, 150, 1, 45, 'mm', function () { draw(); });
+  $('notchShape').onchange = function () { $('slotCtl').hidden = this.value !== 'slot'; draw(); };
   ctl('notchCtls', 'notchDepth', 'Depth (max: the tool’s depth)', 1, 80, 0.5, 15, 'mm', function () {});
 
   $('autoSize').onchange = function () { L.autoSize = this.checked; layoutChanged(true); };
@@ -605,9 +607,10 @@
   $('clearAxis').onclick = function () { var it = selItem(); if (it) { delete S.lib[it.shapeId].axis; save(); syncSel(); draw(); } };
 
   // ---------- Notches ----------
-  // A notch is {id, x, y, d, depth, item, pair}. With `item` set it belongs to that tool: x, y are
-  // in the tool's shape coordinates, so it moves, rotates and flips with the tool, and its depth
-  // never exceeds the tool's. `pair` is its mirror twin across the shape's axis.
+  // A notch is {id, x, y, d, len, ang, depth, item, pair}: a circle of diameter d, or a slot
+  // (stadium) len long and d wide at angle ang. With `item` set it belongs to that tool: x, y, ang
+  // are in the tool's shape coordinates, so it moves, rotates and flips with the tool, and its
+  // depth never exceeds the tool's. `pair` is its mirror twin across the shape's axis.
 
   function toWorldItem(it, p) {
     var a = it.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a), x = it.flip ? -p[0] : p[0];
@@ -618,6 +621,10 @@
     var x = c * dx + s * dy, y = -s * dx + c * dy;
     return [it.flip ? -x : x, y];
   }
+  // Directions (degrees) between shape and bin coordinates.
+  function angToWorld(it, a) { return (it.flip ? 180 - a : a) + it.rot; }
+  function angToItem(it, w) { return it.flip ? 180 - (w - it.rot) : w - it.rot; }
+  function mirrorAng(axis, a) { return 2 * axis.a - a; }
   function itemById(id) { return L.items.find(function (it) { return it.uid === id; }) || null; }
 
   function notchPos(n) {
@@ -628,16 +635,24 @@
     var it = n.item ? itemById(n.item) : null;
     return it ? Math.min(n.depth, it.depth) : n.depth;
   }
-  // Notches in bin coordinates, for geometry.
+  // A notch in bin coordinates (for drawing, hit tests and geometry).
+  function notchWorld(n) {
+    var it = n.item ? itemById(n.item) : null, p = notchPos(n);
+    return { x: p[0], y: p[1], d: n.d, len: n.len || 0, ang: it ? angToWorld(it, n.ang || 0) : n.ang || 0, depth: notchDepth(n) };
+  }
   function notchesWorld() {
-    return L.notches.filter(function (n) { return !n.item || itemById(n.item); }).map(function (n) {
-      var p = notchPos(n);
-      return { x: p[0], y: p[1], d: n.d, depth: notchDepth(n) };
-    });
+    return L.notches.filter(function (n) { return !n.item || itemById(n.item); }).map(notchWorld);
+  }
+
+  // Size and shape for a new notch, from the controls.
+  function newNotch() {
+    var slot = $('notchShape').value === 'slot', d = C.notchD.get();
+    return { d: d, len: slot ? Math.max(d + 1, C.notchLen.get()) : 0 };
   }
 
   // Where a notch would go for the mouse at p: snapped onto the nearest tool outline (within
-  // 14 screen px, unless Alt is held), plus its mirror twin if the tool has an axis.
+  // 14 screen px, unless Alt is held) with a slot laid along the edge there, plus its mirror twin
+  // if the tool has an axis. Returns {pos, ang, item, mirror: {pos, ang}} in bin coordinates.
   function notchTarget(p, noSnap) {
     var v = vt(), best = null, bd = 14 / v.s;
     if (!noSnap) L.items.forEach(function (it) {
@@ -646,26 +661,26 @@
         var a = l[i], b = l[(i + 1) % l.length], dx = b[0] - a[0], dy = b[1] - a[1], ll = dx * dx + dy * dy || 1;
         var t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / ll));
         var q = [a[0] + t * dx, a[1] + t * dy], d = Math.hypot(q[0] - p[0], q[1] - p[1]);
-        if (d < bd) { bd = d; best = { pos: q, item: it }; }
+        if (d < bd) { bd = d; best = { pos: q, item: it, ang: Math.atan2(dy, dx) * 180 / Math.PI }; }
       }
     });
-    var tgt = best || { pos: p, item: null };
+    var tgt = best || { pos: p, item: null, ang: 0 };
     var sh = tgt.item && S.lib[tgt.item.shapeId];
     if (sh && sh.axis && $('notchMirror').checked) {
       var local = toItem(tgt.item, tgt.pos), m = TT.reflect(sh.axis, local);
-      if (Math.hypot(m[0] - local[0], m[1] - local[1]) > C.notchD.get() / 2) tgt.mirror = toWorldItem(tgt.item, m);
+      if (Math.hypot(m[0] - local[0], m[1] - local[1]) > C.notchD.get() / 2)
+        tgt.mirror = { pos: toWorldItem(tgt.item, m), ang: angToWorld(tgt.item, mirrorAng(sh.axis, angToItem(tgt.item, tgt.ang))) };
     }
     return tgt;
   }
 
   function addNotch(tgt) {
-    var d = C.notchD.get(), it = tgt.item, depth = C.notchDepth.get();
-    if (!it) { L.notches.push({ id: uid(), x: tgt.pos[0], y: tgt.pos[1], d: d, depth: depth, item: null, pair: null }); return; }
-    var a = { id: uid(), d: d, depth: depth, item: it.uid, pair: null }, lp = toItem(it, tgt.pos);
-    a.x = lp[0]; a.y = lp[1];
+    var nn = newNotch(), it = tgt.item, depth = C.notchDepth.get();
+    if (!it) { L.notches.push({ id: uid(), x: tgt.pos[0], y: tgt.pos[1], d: nn.d, len: nn.len, ang: tgt.ang, depth: depth, item: null, pair: null }); return; }
+    var lp = toItem(it, tgt.pos), a = { id: uid(), x: lp[0], y: lp[1], d: nn.d, len: nn.len, ang: angToItem(it, tgt.ang), depth: depth, item: it.uid, pair: null };
     L.notches.push(a);
     if (tgt.mirror) {
-      var mp = toItem(it, tgt.mirror), b = { id: uid(), x: mp[0], y: mp[1], d: d, depth: depth, item: it.uid, pair: a.id };
+      var mp = toItem(it, tgt.mirror.pos), b = { id: uid(), x: mp[0], y: mp[1], d: nn.d, len: nn.len, ang: angToItem(it, tgt.mirror.ang), depth: depth, item: it.uid, pair: a.id };
       a.pair = b.id;
       L.notches.push(b);
     }
@@ -682,13 +697,13 @@
     var lp = toItem(it, p);
     n.x = lp[0]; n.y = lp[1];
     var twin = n.pair && L.notches.find(function (q) { return q.id === n.pair; }), sh = S.lib[it.shapeId];
-    if (twin && sh.axis) { var m = TT.reflect(sh.axis, lp); twin.x = m[0]; twin.y = m[1]; }
+    if (twin && sh.axis) { var m = TT.reflect(sh.axis, lp); twin.x = m[0]; twin.y = m[1]; twin.ang = mirrorAng(sh.axis, n.ang || 0); }
   }
 
   function syncLayoutInputs() {
     $('nx').value = L.nx; $('ny').value = L.ny; $('autoSize').checked = L.autoSize;
     C.clearance.set(L.clearance); C.wall.set(L.wall);
-    if (C.floor) { C.floor.set(L.floor); C.maxUnits.set(L.maxUnits); }
+    if (C.floor) { C.floor.set(L.floor); C.maxUnits.set(L.maxUnits); C.chamfer.set(L.chamfer); }
     $('autoUnits').checked = L.autoUnits; $('units').value = L.units;
   }
 
@@ -825,7 +840,8 @@
   // ---------- 3. Generate ----------
 
   ctl('genCtls', 'floor', 'Min floor under pockets', 0.6, 5, 0.1, L.floor, 'mm', function (v) { L.floor = v; invalidate(); save(); });
-  ctl('genCtls', 'maxUnits', 'Max units per print', 1, 12, 1, L.maxUnits, '', function (v) { L.maxUnits = Math.max(1, Math.round(v)); invalidate(); save(); describeLayout(); });
+  ctl('genCtls', 'chamfer', 'Pocket edge chamfer (45°)', 0, 4, 0.25, L.chamfer, 'mm', function (v) { L.chamfer = v; invalidate(); save(); });
+  ctl('genCtls', 'maxUnits','Max units per print', 1, 12, 1, L.maxUnits, '', function (v) { L.maxUnits = Math.max(1, Math.round(v)); invalidate(); save(); describeLayout(); });
   $('autoUnits').onchange = function () { L.autoUnits = this.checked; invalidate(); save(); };
   $('units').oninput = function () { L.units = Math.max(1, Math.round(+this.value) || 1); L.autoUnits = false; $('autoUnits').checked = false; invalidate(); save(); };
   $('generate').onclick = generate;
@@ -1054,6 +1070,21 @@
     drawRuler();
   }
 
+  // A notch (bin coordinates): filled shape plus outline. Slots are a fat round-capped line, so
+  // the outline is drawn as the same line widened and the fill on top of it.
+  function drawNotch(n, fill, line, v) {
+    TT.notchPath(ctx, n);
+    if (n.len > n.d) {
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = line; ctx.lineWidth = n.d + 2 / v.s; ctx.stroke();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = n.d; ctx.stroke();
+      ctx.strokeStyle = fill; ctx.stroke();
+    } else {
+      ctx.fillStyle = fill; ctx.fill();
+      ctx.strokeStyle = line; ctx.lineWidth = 1.5 / v.s; ctx.stroke();
+    }
+  }
+
   // Dashed mirror axis across a box (world units, current transform).
   function drawAxis(ax, box, v) {
     var a = ax.a * Math.PI / 180, ux = Math.cos(a), uy = Math.sin(a), L = Math.hypot(box[2] - box[0], box[3] - box[1]) * 0.6 + 10;
@@ -1111,10 +1142,7 @@
     });
     L.notches.forEach(function (n) {
       if (n.item && !itemById(n.item)) return;
-      var q = notchPos(n);
-      ctx.beginPath(); ctx.arc(q[0], q[1], n.d / 2, 0, 7);
-      ctx.fillStyle = depthColour(notchDepth(n), 0.6); ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1 / v.s; ctx.stroke();
+      drawNotch(notchWorld(n), depthColour(notchDepth(n), 0.6), 'rgba(0,0,0,0.5)', v);
     });
     // Symmetry axes of tools that have one (pink, dashed).
     L.items.forEach(function (it2) {
@@ -1127,10 +1155,11 @@
     });
     // Notch preview: where a click would put it (and its mirror twin).
     if (S.layTool === 'notch' && S.notchPrev) {
-      var np = S.notchPrev, r = C.notchD.get() / 2;
-      ctx.save(); ctx.setLineDash([4 / v.s, 3 / v.s]); ctx.lineWidth = 1.5 / v.s;
-      ctx.strokeStyle = np.item ? '#1c7ed6' : '#666'; ctx.fillStyle = 'rgba(28,126,214,0.15)';
-      [np.pos].concat(np.mirror ? [np.mirror] : []).forEach(function (q) { ctx.beginPath(); ctx.arc(q[0], q[1], r, 0, 7); ctx.fill(); ctx.stroke(); });
+      var np = S.notchPrev, nn = newNotch();
+      ctx.save(); ctx.setLineDash([4 / v.s, 3 / v.s]);
+      [{ pos: np.pos, ang: np.ang }].concat(np.mirror ? [np.mirror] : []).forEach(function (q) {
+        drawNotch({ x: q.pos[0], y: q.pos[1], d: nn.d, len: nn.len, ang: q.ang }, 'rgba(28,126,214,0.15)', np.item ? '#1c7ed6' : '#666', v);
+      });
       ctx.restore();
     }
     ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5 / v.s;
@@ -1180,8 +1209,7 @@
     for (var k = L.notches.length - 1; k >= 0; k--) {
       var n = L.notches[k];
       if (n.item && !itemById(n.item)) continue;
-      var q = notchPos(n);
-      if (Math.hypot(q[0] - p[0], q[1] - p[1]) <= n.d / 2) return n;
+      if (TT.notchDist(notchWorld(n), p) <= 0) return n;
     }
     return null;
   }

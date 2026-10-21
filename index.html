@@ -232,7 +232,9 @@
     </section>
     <section>
       <h2>Finger notches</h2>
+      <div class="field"><label>Shape</label><select id="notchShape"><option value="circle">Circle</option><option value="slot">Slot (along the edge)</option></select></div>
       <div id="notchCtls"></div>
+      <div id="slotCtl" hidden></div>
       <label class="check"><input type="checkbox" id="notchMirror" checked> Mirror across the tool’s symmetry axis</label>
       <p class="hint">Pick <b>Notch</b> (N) above the picture. A dashed circle shows where it will go. Near a tool it snaps onto the outline (hold Alt to place freely), belongs to that tool (moves and rotates with it), and is never deeper than the tool. If the tool has a symmetry axis, a mirrored twin is added. Click a notch to remove it (and its twin); drag notches in Select mode.</p>
     </section>

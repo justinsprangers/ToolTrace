@@ -36,8 +36,9 @@ var TT = window.TT = window.TT || {};
       });
     });
     L.notches.forEach(function (n) {
-      b[0] = Math.min(b[0], n.x - n.d / 2); b[1] = Math.min(b[1], n.y - n.d / 2);
-      b[2] = Math.max(b[2], n.x + n.d / 2); b[3] = Math.max(b[3], n.y + n.d / 2);
+      var r = Math.max(n.d, n.len || 0) / 2;
+      b[0] = Math.min(b[0], n.x - r); b[1] = Math.min(b[1], n.y - r);
+      b[2] = Math.max(b[2], n.x + r); b[3] = Math.max(b[3], n.y + r);
     });
     return b[0] === Infinity ? null : b;
   };
@@ -82,6 +83,24 @@ var TT = window.TT = window.TT || {};
     return Math.max(1, Math.ceil((G.baseH + L.floor + TT.maxDepth(L)) / G.unitH));
   };
 
+  // Notch outline path: a circle (diameter d), or for a slot (len > d) the centre line of a
+  // stadium len long at angle ang (deg); stroke that with lineWidth d and round caps.
+  TT.notchPath = function (ctx, n) {
+    ctx.beginPath();
+    if (n.len > n.d) {
+      var a = (n.ang || 0) * Math.PI / 180, h = (n.len - n.d) / 2, ux = Math.cos(a) * h, uy = Math.sin(a) * h;
+      ctx.moveTo(n.x - ux, n.y - uy); ctx.lineTo(n.x + ux, n.y + uy);
+    } else ctx.arc(n.x, n.y, n.d / 2, 0, 2 * Math.PI);
+  };
+
+  // Distance from p to a notch's edge (negative inside).
+  TT.notchDist = function (n, p) {
+    if (!(n.len > n.d)) return Math.hypot(p[0] - n.x, p[1] - n.y) - n.d / 2;
+    var a = (n.ang || 0) * Math.PI / 180, h = (n.len - n.d) / 2, ux = Math.cos(a), uy = Math.sin(a);
+    var t = Math.max(-h, Math.min(h, (p[0] - n.x) * ux + (p[1] - n.y) * uy));
+    return Math.hypot(p[0] - n.x - t * ux, p[1] - n.y - t * uy) - n.d / 2;
+  };
+
   // ---------- Pocket fields ----------
 
   // Distinct pocket depths, deepest first.
@@ -121,7 +140,8 @@ var TT = window.TT = window.TT || {};
       });
       L.notches.forEach(function (n) {
         if (n.depth < d) return;
-        ctx.beginPath(); ctx.arc(n.x, n.y, n.d / 2, 0, 2 * Math.PI); ctx.fill();
+        TT.notchPath(ctx, n);
+        if (n.len > n.d) { ctx.lineWidth = n.d; ctx.lineCap = 'round'; ctx.stroke(); } else ctx.fill();
       });
       var px = ctx.getImageData(0, 0, w, h).data, mask = new Uint8Array(w * h);
       for (var i = 0; i < w * h; i++) mask[i] = px[i * 4 + 3] >= 128 ? 1 : 0;
@@ -253,14 +273,31 @@ var TT = window.TT = window.TT || {};
     loft(body, [{ z: G.baseH, pts: outline }, { z: firstFloor, pts: outline }]);
     shells.push(body);
 
+    // Layers: one per pocket depth. The top edge chamfer (45°, L.chamfer mm, kept shallower than
+    // the shallowest pocket) is printed as thin steps (~0.2 mm, about one print layer), each with
+    // every pocket grown by its height above the chamfer start.
+    var layers = [];
     fields.forEach(function (pf, k) {
       var z0 = floors[k], z1 = k + 1 < floors.length ? floors[k + 1] : top;
+      if (k === fields.length - 1 && L.chamfer > 0) {
+        var c = Math.min(L.chamfer, z1 - z0 - 0.6);
+        if (c > 0.05) {
+          var n = Math.max(2, Math.ceil(c / 0.2));
+          layers.push({ pf: pf, z0: z0, z1: top - c, off: 0 });
+          for (var s = 1; s <= n; s++) layers.push({ pf: pf, z0: top - c + (s - 1) * c / n, z1: top - c + s * c / n, off: s * c / n });
+          return;
+        }
+      }
+      layers.push({ pf: pf, z0: z0, z1: z1, off: 0 });
+    });
+    layers.forEach(function (ly) {
+      var pf = ly.pf, z0 = ly.z0, z1 = ly.z1;
       if (z1 - z0 < 1e-6) return;
       var i0 = Math.round(X0 / pf.res), j0 = Math.round(Y0 / pf.res);
       var w = Math.round((W + 2) / pf.res) + 1, h = Math.round((H + 2) / pf.res) + 1, g = new Float32Array(w * h);
       for (var j = 0; j < h; j++) for (var i = 0; i < w; i++) {
         var x = -1 + i * pf.res, y = -1 + j * pf.res;
-        g[j * w + i] = Math.max(sdRoundRect(x, y, W / 2, H / 2, W / 2, H / 2, G.radius), -pf.f[(j + j0) * pf.w + (i + i0)]);
+        g[j * w + i] = Math.max(sdRoundRect(x, y, W / 2, H / 2, W / 2, H / 2, G.radius), -(pf.f[(j + j0) * pf.w + (i + i0)] - ly.off));
       }
       var loops = TT.contours(g, w, h).map(function (l) {
         return TT.simplify(l, 0.04).map(function (p) { return [-1 + p[0] * pf.res, H - (-1 + p[1] * pf.res)]; });

@@ -42,7 +42,7 @@ Press **?** (or **Shortcuts** above the picture) for every keyboard shortcut.
 - Drag it to move it, and drag the round handle to rotate (hold Shift to snap to 15°).
 - Keys: arrow keys nudge it (Shift for bigger steps), R rotates 90°, Ctrl+D duplicates, Delete removes it, Ctrl+Z / Ctrl+Y undo and redo.
 - **Selected** panel: pocket depth, exact rotation, Straighten (smallest box), Flip (tool lying the other side up), Duplicate, Remove.
-- **Finger notches:** pick **Notch** (N) above the picture.
+- **Finger notches:** pick **Notch** (N) above the picture. **Shape** is a circle, or a **slot** (a rounded oblong, better for gripping long tools) that lies along the tool's edge where it snaps; set its **Slot length**.
   - A dashed circle previews where the notch will go. Near a tool it snaps onto the tool's outline (hold **Alt** to place it freely).
   - A snapped notch belongs to that tool: it moves, rotates and flips with it, and is never deeper than the tool's pocket.
   - If the tool has a symmetry axis (from **Symmetric** in Capture, or **Add symmetry axis** in the Selected panel), a mirrored twin is added on the other side. Untick **Mirror across the tool's symmetry axis** to place single notches.
@@ -53,13 +53,14 @@ Press **?** (or **Shortcuts** above the picture) for every keyboard shortcut.
 
 ## 3. Generate: bin → STL
 - **Height** comes from the deepest pocket plus the **Min floor**, or set it yourself.
+- **Pocket edge chamfer:** a 45° bevel around the top of every pocket so tools drop in easily (default 1 mm; 0 turns it off). It's printed as ~0.2 mm steps and is always kept shallower than the shallowest pocket.
 - **Max units per print:** 6 fits a 256 mm bed. Wider bins are split at grid lines into pieces; each piece is a normal bin and the pocket runs across the join.
 - **Generate model** builds the mesh, checks that every body is closed, and shows a 3D preview (drag to turn, scroll to zoom).
 - **Download** one STL per piece, plus a 1:1 SVG of the pocket outlines (e.g. for laser-cut foam).
 
 ## What the bins are
 - Standard Gridfinity: 42 mm grid, 41.5 mm bins, 7 mm height units, and the standard 0.8 / 1.8 / 2.15 mm base profile on every cell.
-- Pockets have straight walls. Each tool can have its own depth, and where pockets overlap the deeper one wins.
+- Pockets have straight walls with a chamfered top edge. Each tool can have its own depth, and where pockets overlap the deeper one wins.
 - No stacking lip and no magnet holes (yet). The top is flat.
 - Each STL is several overlapping closed bodies (feet, base, one layer per pocket depth). Slicers merge them when slicing.
 
