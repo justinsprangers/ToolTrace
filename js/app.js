@@ -12,7 +12,7 @@
     phase: 'capture', capView: 'photo', capTool: 'pick', layTool: 'select',
     photo: null, src: null, gray: null, corners: null, refMode: 'paper', gridFit: null,
     warp: null, warpCanvas: null, score: null, segMask: null, mask: null, overlay: null,
-    shapes: [], strokes: [], stroke: null,
+    shapes: [], strokes: [], stroke: null, libTick: {},
     lib: {}, libOrder: [], sel: null, gen: null, preview: null,
     views: {}, drag: null, pending: {}
   };
@@ -34,28 +34,58 @@
   }
 
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  // "167.5 × 125.5 × 21 mm (6.59 × 4.94 × 0.83 in)"
+  function dims(v) {
+    return v.map(function (x) { return +x.toFixed(1); }).join(' × ') + ' mm (' + v.map(function (x) { return (x / 25.4).toFixed(2); }).join(' × ') + ' in)';
+  }
   function fmt(mm) { return mm.toFixed(1) + ' mm (' + (mm / 25.4).toFixed(2) + ' in)'; }
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
   // Labelled number box + slider, kept in sync. The number box accepts values past the slider range.
   var C = {};
+  // A blue tick on the slider marks the default (recommended) value; ↺ appears once it's changed.
   function ctl(parent, id, label, min, max, step, value, unit, onInput) {
-    var div = document.createElement('div');
+    var div = document.createElement('div'), f = Math.min(1, Math.max(0, (value - min) / (max - min)));
     div.className = 'ctl';
-    div.innerHTML = '<div class="top"><label for="n_' + id + '">' + label + '</label><input type="number" id="n_' + id +
-      '" step="' + step + '"><span class="unit">' + (unit || '') + '</span></div><input type="range">';
+    div.innerHTML = '<div class="top"><label for="n_' + id + '">' + label + '</label><button class="reset" title="Back to the default (' + value + ')">↺</button>' +
+      '<input type="number" id="n_' + id + '" step="' + step + '"><span class="unit">' + (unit || '') + '</span></div>' +
+      '<div class="track"><input type="range"><span class="defmark" title="Default: ' + value + '" style="left:calc(8px + (100% - 16px) * ' + f + ' - 1px)"></span></div>';
     var num = div.querySelector('input[type=number]'), rng = div.querySelector('input[type=range]');
     rng.min = min; rng.max = max; rng.step = step;
-    var set = function (v) { num.value = +(+v).toFixed(4); rng.value = v; };
+    var mark = function () { div.classList.toggle('changed', Math.abs((parseFloat(num.value) || 0) - value) > 1e-9); };
+    var set = function (v) { num.value = +(+v).toFixed(4); rng.value = v; mark(); };
     set(value);
-    rng.addEventListener('input', function () { num.value = rng.value; onInput(+rng.value); });
+    rng.addEventListener('input', function () { num.value = rng.value; mark(); onInput(+rng.value); });
     num.addEventListener('input', function () {
       if (num.value === '' || isNaN(+num.value)) return;
-      rng.value = num.value; onInput(+num.value);
+      rng.value = num.value; mark(); onInput(+num.value);
     });
-    C[id] = { get: function () { return parseFloat(num.value) || 0; }, set: set };
+    var reset = function () { set(value); onInput(value); };
+    div.querySelector('.reset').onclick = reset;
+    C[id] = { get: function () { return parseFloat(num.value) || 0; }, set: set, reset: reset, def: value, parent: parent };
     $(parent).appendChild(div);
   }
+
+  // "Restore defaults" buttons reset every slider in their container.
+  document.querySelectorAll('[data-reset]').forEach(function (b) {
+    b.onclick = function () {
+      Object.keys(C).forEach(function (id) { if (C[id].parent === b.dataset.reset) C[id].reset(); });
+      if (b.dataset.reset === 'traceCtls' && !$('fillHoles').checked) { $('fillHoles').checked = true; $('fillHoles').onchange(); }
+    };
+  });
+
+  // Remember which sections are open.
+  (function () {
+    var st = {};
+    try { st = JSON.parse(localStorage.getItem('tooltrace.sections') || '{}'); } catch (e) { /* ignore */ }
+    document.querySelectorAll('details[data-key]').forEach(function (d) {
+      if (d.dataset.key in st) d.open = st[d.dataset.key];
+      d.addEventListener('toggle', function () {
+        st[d.dataset.key] = d.open;
+        try { localStorage.setItem('tooltrace.sections', JSON.stringify(st)); } catch (e) { /* ignore */ }
+      });
+    });
+  })();
 
   function segButtons(id, onPick) {
     $(id).querySelectorAll('button').forEach(function (b) {
@@ -175,7 +205,6 @@
   // {at, off (left out), set (own outline settings or null), nodes (hand-edited node loops or null)}.
   S.edits = []; S.cSel = null; S.selNode = null; // S.sel is the Layout selection
 
-  ctl('extendCtl', 'ext', 'Extend past reference', 0, 300, 5, 0, 'mm', function () { later('warp', function () { runFrom('warp'); }, 250); });
   ctl('traceCtls', 'threshold', 'Sensitivity', 0.05, 1.5, 0.01, 0.35, '', function () { traceInput('score'); });
   ctl('traceCtls', 'lumWeight', 'Brightness weight', 0, 3, 0.05, 1, '', function () { traceInput('score'); });
   // Only needed for mat grid lines; it also blunts sharp tips, so it's off for paper.
@@ -252,8 +281,9 @@
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
     S.photo = c; S.src = c.getContext('2d').getImageData(0, 0, c.width, c.height); S.gray = null;
     S.strokes = []; S.edits = []; S.cSel = null; S.selAt = null; S.selNode = null; S.capHist = []; S.capRedo = [];
-    S.warp = null; S.lab = null; S.shapes = []; S.traced = null;
-    if (name) $('shapeName').value = name.replace(/\.[^.]+$/, '');
+    S.warp = null; S.shapes = []; S.traced = null;
+    S.area = null; $('useArea').checked = false; $('areaTip').hidden = true;
+    if (name) { $('shapeName').value = $('oneName').value = name.replace(/\.[^.]+$/, ''); updatePrefixEx(); }
     S.views['capture-photo'] = { fit: true }; S.views['capture-trace'] = { fit: true };
     var c4 = S.refMode === 'paper' ? TT.detectPaper(S.src) : null;
     S.corners = c4 || [[c.width * 0.25, c.height * 0.25], [c.width * 0.75, c.height * 0.25], [c.width * 0.75, c.height * 0.75], [c.width * 0.25, c.height * 0.75]];
@@ -282,22 +312,43 @@
   }
 
   // Paper mm -> image px mapping and the area to flatten.
+  // Paper mm -> image px mapping and the area to flatten: the reference rectangle, or the work
+  // area (green handles) if one is set, as a polygon in paper mm.
   function reference() {
     if (!S.src || !S.corners) return null;
-    var ext = C.ext.get();
+    var H, w, h;
     if (S.refMode === 'grid') {
       var g = S.gridFit;
       if (!g) return null;
-      return { H: g.H, x0: -ext, y0: -ext, w: g.nx * g.size + 2 * ext, h: g.ny * g.size + 2 * ext };
+      H = g.H; w = g.nx * g.size; h = g.ny * g.size;
+    } else {
+      var a, b;
+      if (S.refMode === 'paper') { var ps = $('paperSize').value.split('x').map(Number); a = ps[0]; b = ps[1]; }
+      else { var u = +$('ptsUnit').value; a = (+$('ptsW').value) * u; b = (+$('ptsH').value) * u; }
+      if (!(a > 0 && b > 0)) return null;
+      var c = TT.orderCorners(S.corners), dims = TT.fitRef(c, a, b);
+      $('refInfo').textContent = 'Reference: ' + fmt(dims[0]) + ' × ' + fmt(dims[1]);
+      H = TT.homography([[0, 0], [dims[0], 0], [dims[0], dims[1]], [0, dims[1]]], c); w = dims[0]; h = dims[1];
     }
-    var a, b;
-    if (S.refMode === 'paper') { var ps = $('paperSize').value.split('x').map(Number); a = ps[0]; b = ps[1]; }
-    else { var u = +$('ptsUnit').value; a = (+$('ptsW').value) * u; b = (+$('ptsH').value) * u; }
-    if (!(a > 0 && b > 0)) return null;
-    var c = TT.orderCorners(S.corners), dims = TT.fitRef(c, a, b);
-    if (S.refMode !== 'grid') $('refInfo').textContent = 'Reference: ' + fmt(dims[0]) + ' × ' + fmt(dims[1]);
-    return { H: TT.homography([[0, 0], [dims[0], 0], [dims[0], dims[1]], [0, dims[1]]], c), x0: -ext, y0: -ext, w: dims[0] + 2 * ext, h: dims[1] + 2 * ext };
+    if (!S.area) return { H: H, x0: 0, y0: 0, w: w, h: h };
+    var inv = TT.invertH(H), poly = TT.orderCorners(S.area).map(function (p) { return TT.applyH(inv, p[0], p[1]); });
+    var bx = [Infinity, Infinity, -Infinity, -Infinity];
+    poly.forEach(function (p) { bx[0] = Math.min(bx[0], p[0]); bx[1] = Math.min(bx[1], p[1]); bx[2] = Math.max(bx[2], p[0]); bx[3] = Math.max(bx[3], p[1]); });
+    if (!(bx[2] - bx[0] > 1 && bx[3] - bx[1] > 1) || bx[2] - bx[0] > 5000 || bx[3] - bx[1] > 5000) return null;
+    return { H: H, x0: bx[0], y0: bx[1], w: bx[2] - bx[0], h: bx[3] - bx[1], poly: poly };
   }
+
+  // Work area: optional second set of handles (green) around where the tools are.
+  $('useArea').onchange = function () {
+    $('areaTip').hidden = !this.checked;
+    if (this.checked && S.corners) {
+      var c = TT.orderCorners(S.corners), cx = 0, cy = 0;
+      c.forEach(function (p) { cx += p[0] / 4; cy += p[1] / 4; });
+      S.area = c.map(function (p) { return [cx + (p[0] - cx) * 1.15, cy + (p[1] - cy) * 1.15]; });
+    } else S.area = null;
+    S.capView = 'photo'; toolbar();
+    runFrom('warp');
+  };
 
   var STAGES = ['warp', 'score', 'seg', 'edit', 'extract', 'fit'];
 
@@ -313,6 +364,11 @@
         var res = Math.max(0.2, Math.sqrt(ref.w * ref.h / 1.5e6)); // edges are sub-pixel, so this is plenty
         S.warp = TT.warp(S.src, ref.H, ref.x0, ref.y0, ref.w, ref.h, res);
         S.lab = null;
+        if (ref.poly) { // outside the work area counts as off the photo
+          var wq = S.warp;
+          for (var j = 0; j < wq.h; j++) for (var i = 0; i < wq.w; i++)
+            if (!TT.pointInLoop([wq.ox + (i + 0.5) * wq.res, wq.oy + (j + 0.5) * wq.res], ref.poly)) wq.data[(j * wq.w + i) * 4 + 3] = 0;
+        }
         S.warpCanvas = toCanvas(S.warp.data, S.warp.w, S.warp.h);
         S.views['capture-trace'] = { fit: true };
         from = 1;
@@ -396,8 +452,22 @@
   function selectShape(sh) {
     S.cSel = sh; S.selNode = null;
     S.selAt = sh ? sh.traced.inside : null;
+    if (sh) $('oneName').value = shapeLabel(sh);
     renderShapeList(); draw();
   }
+
+  // A shape's name: the one typed for it, else "Shape N".
+  function shapeLabel(sh) { return (sh.edit && sh.edit.name) || 'Shape ' + (shapeIndex(sh) + 1); }
+  $('oneName').oninput = function () {
+    if (!S.cSel) return;
+    ensureEdit(S.cSel).name = this.value.trim();
+    renderShapeList();
+  };
+  function updatePrefixEx() {
+    var first = S.shapes.find(function (sh) { return !sh.off; });
+    $('prefixEx').textContent = ($('shapeName').value.trim() || 'tool') + ' ' + (first ? shapeLabel(first) : 'Shape 1');
+  }
+  $('shapeName').oninput = updatePrefixEx;
 
   function toggleOff(sh) {
     capEdit();
@@ -486,16 +556,18 @@
       var w = sh.box[2] - sh.box[0], h = sh.box[3] - sh.box[1], tags = [];
       if (sh.edit && sh.edit.set) tags.push('own settings');
       if (sh.edit && sh.edit.nodes) tags.push('edited');
-      row.innerHTML = '<input type="checkbox"' + (sh.off ? '' : ' checked') + ' title="Include this shape"><span>Shape ' + (k + 1) +
+      row.innerHTML = '<input type="checkbox"' + (sh.off ? '' : ' checked') + ' title="Include this shape"><span>' + esc(shapeLabel(sh)) +
         ' <small>' + w.toFixed(0) + ' × ' + h.toFixed(0) + ' mm' + (tags.length ? ' · ' + tags.join(', ') : '') + '</small></span>';
       row.querySelector('input').onchange = function () { toggleOff(sh); };
       row.onclick = function (ev) { if (ev.target.tagName !== 'INPUT') { ev.preventDefault(); selectShape(sh === S.cSel ? null : sh); } };
       box.appendChild(row);
     });
     $('shapeSel').hidden = !sel;
+    $('saveOne').hidden = !sel;
+    updatePrefixEx();
     if (sel) {
       var own = !!(sel.edit && sel.edit.set), s = own ? sel.edit.set : globalSet();
-      $('shTitle').textContent = 'Shape ' + (shapeIndex(sel) + 1);
+      $('shTitle').textContent = shapeLabel(sel);
       $('shDel').textContent = sel.off ? 'Include shape (Del)' : 'Exclude shape (Del)';
       $('shOwn').checked = own;
       var sym = sel.edit && sel.edit.sym;
@@ -525,11 +597,23 @@
     else status('Traced ' + n + ' shape' + (n > 1 ? 's' : '') + ' in ' + Math.round(ms) + ' ms. Untick shapes you don’t want, click one to edit its nodes, then “Add to library”.');
   }
 
+  // All ticked shapes, named "prefix + shape name".
   function addShapes() {
     var use = S.shapes.filter(function (sh) { return !sh.off; });
     if (!use.length) { status('No shapes are ticked.', true); return; }
-    var base = $('shapeName').value.trim() || 'tool', depth = C.depth.get();
-    use.forEach(function (sh, k) {
+    var base = $('shapeName').value.trim();
+    addToLib(use, function (sh) { return (base ? base + ' ' : '') + shapeLabel(sh); });
+  }
+  // Just the selected shape, under the name typed for it.
+  $('addOne').onclick = function () {
+    if (!S.cSel) { status('Select a shape first.', true); return; }
+    var name = $('oneName').value.trim() || shapeLabel(S.cSel);
+    addToLib([S.cSel], function () { return name; });
+  };
+
+  function addToLib(use, nameOf) {
+    var depth = C.depth.get();
+    use.forEach(function (sh) {
       var id = 's' + uid(), a = 0, cx = 0, cy = 0, o = sh.path[0];
       for (var i = 0, j = o.length - 1; i < o.length; j = i++) {
         var cr = o[j][0] * o[i][1] - o[i][0] * o[j][1];
@@ -538,13 +622,13 @@
       cx /= 3 * a; cy /= 3 * a;
       var loops = sh.path.map(function (l) { return TT.simplify(l, 0.02).map(function (p) { return [+(p[0] - cx).toFixed(3), +(p[1] - cy).toFixed(3)]; }); });
       var b = shapeBox({ loops: loops }), sym = sh.edit && sh.edit.sym;
-      S.lib[id] = { id: id, name: base + (use.length > 1 ? ' ' + (k + 1) : ''), loops: loops, depth: depth, w: b[2] - b[0], h: b[3] - b[1] };
+      S.lib[id] = { id: id, name: nameOf(sh), loops: loops, depth: depth, w: b[2] - b[0], h: b[3] - b[1] };
       // Mirror axis (shape coordinates), used for symmetric finger notches in Layout.
       if (sym) S.lib[id].axis = { p: [+(sym.p[0] - cx).toFixed(3), +(sym.p[1] - cy).toFixed(3)], a: sym.a };
       S.libOrder.push(id);
     });
     save(); renderLib();
-    $('captureInfo').innerHTML = esc('Added ' + use.length + ' shape' + (use.length > 1 ? 's' : '') + ' to the library.') + ' <a href="#" id="goLayout">Go to Layout →</a>';
+    $('captureInfo').innerHTML = esc('Added ' + use.map(nameOf).join(', ') + ' to the library.') + ' <a href="#" id="goLayout">Go to Layout →</a>';
     $('goLayout').onclick = function (e) { e.preventDefault(); setPhase('layout'); };
   }
 
@@ -779,7 +863,7 @@
   // Warnings about tools too close to the bin edge.
   function describeLayout() {
     var lines = [], W = TT.binSize(L.nx), H = TT.binSize(L.ny), tight = [];
-    lines.push('Bin: ' + L.nx + ' × ' + L.ny + ' units = ' + W + ' × ' + H + ' mm');
+    lines.push('Bin: ' + L.nx + ' × ' + L.ny + ' units = ' + dims([W, H]));
     var pcs = TT.pieces(L);
     if (pcs.length > 1) lines.push('Prints as ' + pcs.length + ' pieces (max ' + L.maxUnits + ' units each)');
     L.items.forEach(function (it) {
@@ -797,29 +881,66 @@
     S.libOrder.forEach(function (id) {
       var sh = S.lib[id], row = document.createElement('div');
       row.className = 'libitem';
-      row.innerHTML = '<canvas width="128" height="88"></canvas><div class="meta"><input type="text"><small>' +
+      row.innerHTML = '<input type="checkbox" title="Tick to delete several at once"' + (S.libTick[id] ? ' checked' : '') + '>' +
+        '<canvas width="128" height="88"></canvas><div class="meta"><input type="text"><small>' +
         sh.w.toFixed(0) + ' × ' + sh.h.toFixed(0) + ' mm</small></div><button title="Add to bin">Add</button><button title="Delete from library">✕</button>';
+      row.querySelector('input[type=checkbox]').onchange = function () { if (this.checked) S.libTick[id] = 1; else delete S.libTick[id]; libBar(); };
       var c = row.querySelector('canvas'), g = c.getContext('2d'), b = shapeBox(sh), k = Math.min(116 / (b[2] - b[0]), 76 / (b[3] - b[1]));
       g.setTransform(k, 0, 0, k, 64 - k * (b[0] + b[2]) / 2, 44 - k * (b[1] + b[3]) / 2);
       g.beginPath();
       sh.loops.forEach(function (l) { l.forEach(function (p, i) { g[i ? 'lineTo' : 'moveTo'](p[0], p[1]); }); g.closePath(); });
       g.fillStyle = '#e8590c'; g.fill('evenodd');
-      var name = row.querySelector('input');
+      var name = row.querySelector('input[type=text]');
       name.value = sh.name;
       name.onchange = function () { sh.name = name.value; save(); syncSel(); };
       var bt = row.querySelectorAll('button');
       bt[0].onclick = function () { addItem(id); };
-      bt[1].onclick = function () {
-        var used = L.items.some(function (it) { return it.shapeId === id; });
-        if (!confirm('Delete “' + sh.name + '” from the library' + (used ? ' and the bin' : '') + '?')) return;
-        delete S.lib[id];
-        S.libOrder = S.libOrder.filter(function (x) { return x !== id; });
-        L.items = L.items.filter(function (it) { return it.shapeId !== id; });
-        if (!selItem()) S.sel = null;
-        renderLib(); layoutChanged(true);
-      };
+      bt[1].onclick = function () { deleteLib([id]); };
       box.appendChild(row);
     });
+    libBar();
+  }
+
+  function libBar() {
+    var n = Object.keys(S.libTick).filter(function (id) { return S.lib[id]; }).length;
+    $('libDel').disabled = !n;
+    $('libDel').textContent = n ? 'Delete ticked (' + n + ')' : 'Delete ticked';
+    $('libAll').checked = n > 0 && n === S.libOrder.length;
+  }
+  $('libAll').onchange = function () {
+    S.libTick = {};
+    if (this.checked) S.libOrder.forEach(function (id) { S.libTick[id] = 1; });
+    renderLib();
+  };
+  $('libDel').onclick = function () {
+    var ids = Object.keys(S.libTick).filter(function (id) { return S.lib[id]; });
+    if (ids.length && confirm('Delete ' + ids.length + ' shape' + (ids.length > 1 ? 's' : '') + ' from the library (and the bin)?')) deleteLib(ids);
+  };
+
+  // Delete library shapes (and their tools and notches in the bin). One level of undo via the
+  // status bar, so single deletes don't need a confirmation.
+  function deleteLib(ids) {
+    var gone = {};
+    ids.forEach(function (id) { gone[id] = 1; });
+    S.libUndo = { lib: ids.map(function (id) { return S.lib[id]; }), order: S.libOrder.slice(), items: L.items.slice(), notches: L.notches.slice() };
+    ids.forEach(function (id) { delete S.lib[id]; delete S.libTick[id]; });
+    S.libOrder = S.libOrder.filter(function (x) { return !gone[x]; });
+    var keep = L.items.filter(function (it) { return !gone[it.shapeId]; }), keepIds = {};
+    keep.forEach(function (it) { keepIds[it.uid] = 1; });
+    L.items = keep;
+    L.notches = L.notches.filter(function (n) { return !n.item || keepIds[n.item]; });
+    if (!selItem()) S.sel = null;
+    renderLib(); layoutChanged(true);
+    $('status').innerHTML = esc('Deleted ' + S.libUndo.lib.map(function (s) { return '“' + s.name + '”'; }).join(', ') + '.') + ' <a href="#" id="libUndo">Undo</a>';
+    $('status').className = '';
+    $('libUndo').onclick = function (e) {
+      e.preventDefault();
+      var u = S.libUndo;
+      if (!u) return;
+      u.lib.forEach(function (s) { S.lib[s.id] = s; });
+      S.libOrder = u.order; L.items = u.items; L.notches = u.notches; S.libUndo = null;
+      renderLib(); layoutChanged(true); status('Restored.');
+    };
   }
 
   // New item is laid landscape and goes below what's already in the bin.
@@ -870,7 +991,7 @@
       }
       S.gen = { meshes: meshes, fields: fields, GL: GL };
       S.preview = new TT.Preview3D(meshes);
-      var lines = [L.nx + ' × ' + L.ny + ' units, ' + L.units + ' high (' + W + ' × ' + H + ' × ' + top + ' mm)',
+      var lines = [L.nx + ' × ' + L.ny + ' units, ' + L.units + ' high', dims([W, H, top]),
         pieces.length + ' piece' + (pieces.length > 1 ? 's' : '') + ', ' + Math.round(tris).toLocaleString() + ' triangles, built in ' + Math.round(performance.now() - t0) + ' ms'];
       var warn = [];
       if (floor < L.floor - 0.01) warn.push('Floor under the deepest pocket is only ' + floor.toFixed(1) + ' mm. Add height units.');
@@ -899,7 +1020,8 @@
       S.gen.meshes.forEach(function (m, k) { setTimeout(function () { download(name(m, k), TT.stl(m.shells), 'model/stl'); }, k * 400); });
     }, true);
     S.gen.meshes.forEach(function (m, k) {
-      button((many ? 'Piece ' + (k + 1) + ': ' : '') + m.pc.kx + ' × ' + m.pc.ky + ' units (STL)', function () { download(name(m, k), TT.stl(m.shells), 'model/stl'); }, !many);
+      var pw = TT.binSize(m.pc.kx), ph = TT.binSize(m.pc.ky);
+      button((many ? 'Piece ' + (k + 1) + ': ' : '') + m.pc.kx + ' × ' + m.pc.ky + ' units · ' + pw + ' × ' + ph + ' mm (' + (pw / 25.4).toFixed(1) + ' × ' + (ph / 25.4).toFixed(1) + ' in)', function () { download(name(m, k), TT.stl(m.shells), 'model/stl'); }, !many);
     });
     button('Pocket outline (SVG, 1:1)', function () { download(base + '_outline.svg', TT.svg(L, S.gen.fields), 'image/svg+xml'); });
   }
@@ -979,15 +1101,20 @@
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     var scr = function (p) { return [p[0] * v.s + v.x, p[1] * v.s + v.y]; };
-    var c4 = TT.orderCorners(S.corners).map(scr);
-    ctx.strokeStyle = '#e8590c'; ctx.lineWidth = 2;
-    ctx.beginPath(); c4.forEach(function (p, k) { ctx[k ? 'lineTo' : 'moveTo'](p[0], p[1]); }); ctx.closePath(); ctx.stroke();
-    S.corners.forEach(function (p) {
-      var q = scr(p);
-      ctx.beginPath(); ctx.arc(q[0], q[1], 10, 0, 7); ctx.fillStyle = 'rgba(232,89,12,0.3)'; ctx.fill(); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(q[0] - 4, q[1]); ctx.lineTo(q[0] + 4, q[1]); ctx.moveTo(q[0], q[1] - 4); ctx.lineTo(q[0], q[1] + 4); ctx.stroke();
+    // Reference handles (orange) and the optional work area (green, dashed).
+    [[S.corners, '#e8590c', 'rgba(232,89,12,0.3)', []], [S.area, '#2b8a3e', 'rgba(43,138,62,0.25)', [8, 5]]].forEach(function (set) {
+      if (!set[0]) return;
+      var c4 = TT.orderCorners(set[0]).map(scr);
+      ctx.strokeStyle = set[1]; ctx.lineWidth = 2; ctx.setLineDash(set[3]);
+      ctx.beginPath(); c4.forEach(function (p, k) { ctx[k ? 'lineTo' : 'moveTo'](p[0], p[1]); }); ctx.closePath(); ctx.stroke();
+      ctx.setLineDash([]);
+      set[0].forEach(function (p) {
+        var q = scr(p);
+        ctx.beginPath(); ctx.arc(q[0], q[1], 10, 0, 7); ctx.fillStyle = set[2]; ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(q[0] - 4, q[1]); ctx.lineTo(q[0] + 4, q[1]); ctx.moveTo(q[0], q[1] - 4); ctx.lineTo(q[0], q[1] + 4); ctx.stroke();
+      });
     });
-    if (S.drag && S.drag.corner !== undefined) drawLoupe(S.corners[S.drag.corner]);
+    if (S.drag && S.drag.corner !== undefined) drawLoupe((S.drag.area ? S.area : S.corners)[S.drag.corner]);
   }
 
   // Magnified view around a dragged handle, in the top-left corner.
@@ -1072,16 +1199,17 @@
 
   // A notch (bin coordinates): filled shape plus outline. Slots are a fat round-capped line, so
   // the outline is drawn as the same line widened and the fill on top of it.
-  function drawNotch(n, fill, line, v) {
+  function drawNotch(n, fill, line, v, bold) {
+    var lw = (bold ? 3 : 1.5) / v.s;
     TT.notchPath(ctx, n);
     if (n.len > n.d) {
       ctx.lineCap = 'round';
-      ctx.strokeStyle = line; ctx.lineWidth = n.d + 2 / v.s; ctx.stroke();
+      ctx.strokeStyle = line; ctx.lineWidth = n.d + 2 * lw; ctx.stroke();
       ctx.strokeStyle = '#fff'; ctx.lineWidth = n.d; ctx.stroke();
       ctx.strokeStyle = fill; ctx.stroke();
     } else {
       ctx.fillStyle = fill; ctx.fill();
-      ctx.strokeStyle = line; ctx.lineWidth = 1.5 / v.s; ctx.stroke();
+      ctx.strokeStyle = line; ctx.lineWidth = lw; ctx.stroke();
     }
   }
 
@@ -1142,7 +1270,8 @@
     });
     L.notches.forEach(function (n) {
       if (n.item && !itemById(n.item)) return;
-      drawNotch(notchWorld(n), depthColour(notchDepth(n), 0.6), 'rgba(0,0,0,0.5)', v);
+      var on = n.id === S.selNotch;
+      drawNotch(notchWorld(n), depthColour(notchDepth(n), 0.6), on ? '#1c7ed6' : 'rgba(0,0,0,0.5)', v, on);
     });
     // Symmetry axes of tools that have one (pink, dashed).
     L.items.forEach(function (it2) {
@@ -1227,10 +1356,12 @@
       return;
     }
     if (S.phase === 'capture' && S.capView === 'photo' && S.corners) {
-      var best = -1, bd = 30 / v.s;
+      var best = -1, bd = 30 / v.s, inArea = false;
       S.corners.forEach(function (c, i) { var d = Math.hypot(c[0] - p[0], c[1] - p[1]); if (d < bd) { bd = d; best = i; } });
+      if (S.area) S.area.forEach(function (c, i) { var d = Math.hypot(c[0] - p[0], c[1] - p[1]); if (d < bd) { bd = d; best = i; inArea = true; } });
       if (best < 0) return;
-      S.drag = { corner: best, dx: S.corners[best][0] - p[0], dy: S.corners[best][1] - p[1] };
+      var set = inArea ? S.area : S.corners;
+      S.drag = { corner: best, area: inArea, dx: set[best][0] - p[0], dy: set[best][1] - p[1] };
     } else if (S.phase === 'capture' && S.capView === 'trace' && S.warp) {
       if (S.capTool === 'select') {
         var sh = S.cSel, tol = 8 / v.s;
@@ -1284,8 +1415,10 @@
           return;
         }
       }
-      var hitI = hitItem(p), hitN = hitI ? null : hitNotch(p);
+      // Notches sit on top of tools, so they win the click.
+      var hitN = hitNotch(p), hitI = hitN ? null : hitItem(p);
       S.sel = hitI ? hitI.uid : null;
+      S.selNotch = hitN ? hitN.id : null;
       syncSel();
       if (hitI || hitN) S.drag = { move: hitI || hitN, last: p, moved: false };
       draw();
@@ -1318,7 +1451,7 @@
       var nd = sh.nodes[d.node.loop][d.node.k];
       nd.x = +p[0].toFixed(3); nd.y = +p[1].toFixed(3);
       nodesEdited(sh); draw();
-    } else if (d.corner !== undefined) { S.corners[d.corner] = [p[0] + d.dx, p[1] + d.dy]; draw(); }
+    } else if (d.corner !== undefined) { (d.area ? S.area : S.corners)[d.corner] = [p[0] + d.dx, p[1] + d.dy]; draw(); }
     else if (d.stroke) {
       if (Math.abs(e.clientX - d.sx) + Math.abs(e.clientY - d.sy) >= 3) { d.sx = e.clientX; d.sy = e.clientY; S.stroke.pts.push(p); }
       draw();
@@ -1344,7 +1477,7 @@
       if (d.moved && axisSide(dsh, [dn.x, dn.y])) { nodesEdited(dsh, axisSide(dsh, [dn.x, dn.y])); S.selNode = null; }
       renderShapeList(); draw();
     }
-    else if (d.corner !== undefined) { if (S.refMode === 'grid') fitGrid(); runFrom('warp'); }
+    else if (d.corner !== undefined) { if (S.refMode === 'grid' && !d.area) fitGrid(); runFrom('warp'); }
     else if (d.stroke) { capEdit(); S.strokes.push(S.stroke); S.stroke = null; runFrom('edit'); toolbar(); }
     else if (d.rotate || (d.move && d.moved)) layoutChanged(true);
     else draw();
@@ -1502,7 +1635,9 @@
     if (S.phase === 'layout') {
       if (k === 'v') { S.layTool = 'select'; toolbar(); return; }
       if (k === 'n') { S.layTool = 'notch'; toolbar(); return; }
-      if (e.key === 'Escape') { S.sel = null; S.layTool = 'select'; toolbar(); syncSel(); draw(); return; }
+      if (e.key === 'Escape') { S.sel = null; S.selNotch = null; S.layTool = 'select'; toolbar(); syncSel(); draw(); return; }
+      var sn = S.selNotch && L.notches.find(function (n) { return n.id === S.selNotch; });
+      if (sn && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); removeNotch(sn); S.selNotch = null; layoutChanged(true); return; }
       var it = selItem();
       if (!it) return;
       var step = e.shiftKey ? 5 : 0.5, moved = true;

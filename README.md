@@ -10,6 +10,7 @@ It works in three steps (tabs at the top).
    - **Paper** (most reliable): tools on plain white paper. The app finds the paper corners. Drag the handles if they're off.
    - **Grid mat:** tools on a cutting mat. Enter the size of the *smallest* grid squares, then press **Detect grid**. It places the handles and counts the squares. If detection fails, put the 4 handles on grid crossings and type how many squares are between them. The handles snap to the crossings and the fitted grid is drawn over the photo so you can check it. Common mats have 1/2-inch lines, so check the size against the inch labels.
    - **4 points:** drag the handles onto the corners of any rectangle of known size.
+   - **Set a work area** (optional): green handles mark where the tools are, and only that area is traced. Use it when tools hang past the reference, or to skip clutter. Without it, the reference area itself is traced.
 3. **Trace:** the Trace view shows each traced shape in yellow, with its size.
    - Shadows or grid lines get traced: raise **Sensitivity**, or lower **Brightness weight**.
    - Shiny or pale parts are missed: lower **Sensitivity**.
@@ -33,12 +34,16 @@ It works in three steps (tabs at the top).
      - **Smooth noise:** ignores small bites and bumps (glare, mat lines) between corners, and curves keep their curvature. 4 mm suits most tools.
      - **Snap straight edges:** straight runs become exact lines; gentle curves stay curves.
      - **Node detail:** how far the outline may stray from the trace before another node is added. Lower means more nodes.
-6. **Save outlines:** give them a name and a default pocket depth, then **Add to library** (or press Enter). Every ticked shape becomes its own library entry.
+6. **Save to library** (set the default pocket depth first):
+   - **Add selected:** saves just the selected shape under the name you type. The name also shows in the Shapes list.
+   - **Add all ticked** (Enter): saves every ticked shape as “prefix + shape name”, e.g. “bench Shape 2”.
+
+Sliders show their default as a small blue tick; ↺ next to a changed slider puts it back, and **Restore defaults** resets a whole section. Sections fold up (click the title) and stay how you left them.
 
 Press **?** (or **Shortcuts** above the picture) for every keyboard shortcut.
 
 ## 2. Layout: shapes → bin
-- **Add** a library shape to put it in the bin.
+- **Add** a library shape to put it in the bin. ✕ deletes one shape straight away (with **Undo** in the status bar); tick several (or **All**) and press **Delete ticked** to remove many with one confirmation.
 - Drag it to move it, and drag the round handle to rotate (hold Shift to snap to 15°).
 - Keys: arrow keys nudge it (Shift for bigger steps), R rotates 90°, Ctrl+D duplicates, Delete removes it, Ctrl+Z / Ctrl+Y undo and redo.
 - **Selected** panel: pocket depth, exact rotation, Straighten (smallest box), Flip (tool lying the other side up), Duplicate, Remove.
@@ -46,7 +51,7 @@ Press **?** (or **Shortcuts** above the picture) for every keyboard shortcut.
   - A dashed circle previews where the notch will go. Near a tool it snaps onto the tool's outline (hold **Alt** to place it freely).
   - A snapped notch belongs to that tool: it moves, rotates and flips with it, and is never deeper than the tool's pocket.
   - If the tool has a symmetry axis (from **Symmetric** in Capture, or **Add symmetry axis** in the Selected panel), a mirrored twin is added on the other side. Untick **Mirror across the tool's symmetry axis** to place single notches.
-  - Click a notch to remove it (and its twin). Drag notches in Select mode; a twin follows.
+  - In Select mode, click a notch to select it (blue) and press **Delete** to remove it and its twin; drag it to move it (a twin follows). In Notch mode, clicking a notch removes it.
   - The bin grows to fit notches near its edge.
 - **Bin:** **Clearance** is the gap around every tool (1 mm is a good start), and **Min wall** is the minimum material left at the bin edge. With **Fit bin to the tools automatically** on, the bin size follows the tools. Turn it off to set the units yourself.
 - The library and layout are saved in your browser automatically. Use **Save project / Open project** (top right) to back them up or move them to another computer.

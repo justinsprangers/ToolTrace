@@ -73,6 +73,28 @@
   details summary { cursor: pointer; font-weight: 600; }
   details li { margin: 4px 0; }
   .downloads { display: flex; flex-direction: column; gap: 6px; }
+  /* Collapsible sections */
+  details.sec { border-bottom: 1px solid var(--line); padding: 4px 0 10px; }
+  details.sec[hidden] { display: none; }
+  details.sec > summary { list-style: none; cursor: pointer; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--mute); font-weight: 600; padding: 8px 0 6px; display: flex; align-items: center; gap: 6px; }
+  details.sec > summary::-webkit-details-marker { display: none; }
+  details.sec > summary::before { content: '▸'; font-size: 11px; transition: transform .15s; }
+  details.sec[open] > summary::before { transform: rotate(90deg); }
+  ul.tips { margin: 6px 0; padding-left: 18px; color: var(--mute); font-size: 12.5px; }
+  ul.tips li { margin: 2px 0; }
+  details.more { padding: 2px 0; font-size: 12.5px; color: var(--mute); }
+  details.more > summary { cursor: pointer; font-weight: 500; color: #1c7ed6; font-size: 12.5px; }
+  details.more ul, details.more p { margin: 4px 0; padding-left: 18px; }
+  details.more p { padding-left: 0; }
+  /* Slider default marker and reset */
+  .ctl .track { position: relative; }
+  .ctl .defmark { position: absolute; top: -2px; width: 2px; height: 8px; background: #1c7ed6; border-radius: 1px; pointer-events: none; opacity: .8; }
+  .ctl .reset { border: 0; background: none; color: #1c7ed6; cursor: pointer; font-size: 14px; padding: 0 2px; visibility: hidden; }
+  .ctl.changed .reset { visibility: visible; }
+  .savebox { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; margin: 8px 0; }
+  .libbar { align-items: center; }
+  .libbar .check { margin: 0 6px 0 0; }
+  .libitem input[type=checkbox] { width: auto; flex: none; }
   .shapelist { display: flex; flex-direction: column; gap: 3px; max-height: 260px; overflow-y: auto; }
   .shaperow { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 5px; cursor: pointer; border: 1px solid transparent; }
   .shaperow:hover { background: #f4f4f2; }
@@ -115,14 +137,22 @@
 </header>
 <main>
 <aside>
-  <!-- 1. Capture: photo -> flattened image -> traced outlines -> library -->
+  <!-- 1. Capture: photo -> flattened image -> traced outlines -> library.
+       Sections are <details class="sec">; their open/closed state is remembered (data-key). -->
   <div class="panel" id="panel-capture">
-    <section>
-      <h2>Photo</h2>
+    <details class="sec" open data-key="photo"><summary>Photo</summary>
       <input type="file" id="file" accept="image/*">
-    </section>
-    <section>
-      <h2>Scale reference</h2>
+      <details class="more"><summary>Tips for a good photo</summary>
+        <ul>
+          <li>Plain white paper is the most reliable reference; tabloid or poster board for long tools.</li>
+          <li>Shoot straight down from high up with 2–3× zoom.</li>
+          <li>Even light, no hard shadows; tools not touching.</li>
+          <li>Several tools per photo is fine: each becomes its own shape.</li>
+        </ul>
+      </details>
+    </details>
+
+    <details class="sec" open data-key="ref"><summary>Scale reference</summary>
       <div class="seg" id="refMode">
         <button data-mode="paper" class="on">Paper</button>
         <button data-mode="grid">Grid mat</button>
@@ -138,88 +168,118 @@
             <option value="297x420">A3</option>
           </select></div>
         <div class="btns"><button class="b" id="findPaper">Find paper</button></div>
-        <p class="hint">Drag the 4 handles onto the paper corners if they're off. Scroll to zoom, right-drag to pan.</p>
+        <ul class="tips"><li>Orange handles go on the paper corners.</li></ul>
       </div>
       <div data-ref="grid" hidden>
         <div class="field"><label>Grid square size</label><input type="number" id="gridSize" value="0.5" step="0.0625" min="0.01"><select id="gridUnit" style="flex:0 0 70px"><option value="25.4">in</option><option value="10">cm</option><option value="1">mm</option></select></div>
         <div class="field"><label>Squares across × down</label><input type="number" id="gridNx" value="20" min="1"><input type="number" id="gridNy" value="12" min="1"></div>
         <div class="btns"><button class="b" id="detectGrid">Detect grid</button></div>
-        <p class="hint">“Detect grid” finds the mat lines and fills in the handles and square counts. If it can't, put the handles on 4 grid crossings and type how many squares are between them. The handles snap to the nearest crossings. Measure the size of the smallest squares on your mat.</p>
+        <ul class="tips"><li>Use the size of the <b>smallest</b> squares.</li><li>Check the blue grid drawn over the photo.</li></ul>
+        <details class="more"><summary>If detection fails</summary>
+          <p>Put the 4 orange handles on any 4 grid crossings and type how many squares are between them. The handles snap to the nearest crossings. Many mats have ½-inch lines between the inch labels.</p>
+        </details>
       </div>
       <div data-ref="points" hidden>
         <div class="field"><label>Rectangle width × height</label><input type="number" id="ptsW" value="10" step="0.01"><input type="number" id="ptsH" value="12" step="0.01"></div>
         <div class="field"><label>Units</label><select id="ptsUnit"><option value="25.4">inches</option><option value="1">mm</option></select></div>
-        <p class="hint">Drag the 4 handles onto the corners of any rectangle of known size.</p>
+        <ul class="tips"><li>Orange handles go on the corners of any rectangle of known size.</li></ul>
       </div>
-      <div id="extendCtl"></div>
+      <label class="check"><input type="checkbox" id="useArea"> Set a work area</label>
+      <ul class="tips" id="areaTip" hidden><li>Green handles mark where the tools are. Only that area is traced.</li></ul>
+      <details class="more"><summary>When to use a work area</summary>
+        <p>Without one, only the reference itself (the paper or grid area) is traced. Use a work area when tools hang past the reference, or to skip clutter around it. It can be bigger or smaller than the reference.</p>
+      </details>
       <div id="refInfo" class="info"></div>
-    </section>
-    <section>
-      <h2>Trace</h2>
+    </details>
+
+    <details class="sec" data-key="trace"><summary>Trace settings</summary>
       <div id="traceCtls"></div>
       <label class="check"><input type="checkbox" id="fillHoles" checked> Fill holes inside outlines</label>
-      <p class="hint">Picks up shadows or grid lines → raise Sensitivity or lower Brightness weight. Misses shiny or pale parts → lower Sensitivity. Tools merging → lower Bridge gaps.</p>
-    </section>
-    <section>
-      <h2>Fix up</h2>
-      <p class="hint">Tools above the Trace view: <b>Brush keep / erase</b> (B / E) add or remove exactly what you paint, e.g. the mat between snip handles. [ and ] change the brush size; Ctrl+Z undoes. <b>Select</b> (V) is for shapes and nodes, below.</p>
-    </section>
-    <section>
-      <h2>Shapes</h2>
-      <p class="hint">Untick a shape to leave it out. Click one (here or on the picture) to select it and edit its nodes.</p>
-      <div class="shapelist" id="shapeList"></div>
-      <details class="sub"><summary>Outline settings for all shapes</summary>
-        <p class="hint">Corners (cyan) stay sharp. Smoothing only removes noise between them; straight runs become exact lines and curves stay curves. Node detail sets how closely the nodes follow the traced edge.</p>
-        <div id="outlineCtls"></div>
+      <div class="btns"><button class="b" data-reset="traceCtls">Restore defaults</button></div>
+      <details class="more"><summary>Which slider to change</summary>
+        <ul>
+          <li>Shadows or grid lines traced → raise <b>Sensitivity</b> or lower <b>Brightness weight</b>.</li>
+          <li>Shiny or pale parts missed → lower <b>Sensitivity</b>.</li>
+          <li>Tools merging → lower <b>Bridge gaps</b>.</li>
+          <li><b>Remove thin lines</b> is for mat grids; keep it 0 on paper.</li>
+        </ul>
       </details>
-    </section>
-    <section id="shapeSel" hidden>
-      <h2 id="shTitle">Shape</h2>
+    </details>
+
+    <details class="sec" open data-key="fix"><summary>Fix up</summary>
+      <ul class="tips">
+        <li><b>Brush keep / erase</b> (B / E): add or remove what you paint.</li>
+        <li><kbd>[</kbd> <kbd>]</kbd> brush size · <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo.</li>
+      </ul>
+    </details>
+
+    <details class="sec" open data-key="shapes"><summary>Shapes</summary>
+      <ul class="tips"><li>Untick to leave a shape out.</li><li>Click a shape to select it and edit its nodes.</li></ul>
+      <div class="shapelist" id="shapeList"></div>
+      <details class="sub" data-key="outline"><summary>Outline settings for all shapes</summary>
+        <div id="outlineCtls"></div>
+        <div class="btns"><button class="b" data-reset="outlineCtls">Restore defaults</button></div>
+        <details class="more"><summary>What these do</summary>
+          <ul>
+            <li>Corners (cyan) stay sharp.</li>
+            <li>Smoothing only removes noise between corners.</li>
+            <li>Straight runs become exact lines; curves stay curves.</li>
+            <li>Node detail: lower = more nodes, closer to the trace.</li>
+          </ul>
+        </details>
+      </details>
+    </details>
+
+    <details class="sec" open id="shapeSel" hidden><summary id="shTitle">Shape</summary>
       <div class="btns"><button class="b" id="shDel">Exclude shape (Del)</button><button class="b" id="shRefit" title="Throw away hand edits and fit the nodes again">Re-fit nodes</button></div>
       <label class="check"><input type="checkbox" id="shSym"> Symmetric</label>
       <div id="symCtls" hidden>
-        <p class="hint">The two halves are averaged across the pink axis and the nodes mirrored, so the outline is exactly symmetric. Editing a node mirrors it to the other side when you let go.</p>
+        <ul class="tips"><li>Halves averaged across the pink axis; edits mirror on release.</li></ul>
         <div class="btns"><button class="b" id="shFindAxis">Find axis again</button></div>
       </div>
       <label class="check"><input type="checkbox" id="shOwn"> Own outline settings</label>
       <div id="shapeCtls" hidden></div>
       <div class="info" id="shInfo"></div>
-      <p class="hint"><b>Nodes:</b> drag to move. Click the outline to add a node. Double-click a node (or <kbd>C</kbd>) to switch corner ■ / smooth ●. <kbd>L</kbd> makes the segment after the selected node a straight line. <kbd>Delete</kbd> removes the selected node, or excludes the shape if no node is selected. <kbd>Esc</kbd> deselects.</p>
-    </section>
-    <section>
-      <h2>Save outlines</h2>
-      <div class="field"><label>Name</label><input type="text" id="shapeName" value="tool"></div>
+      <details class="more"><summary>Editing nodes</summary>
+        <ul>
+          <li>Drag a node to move it; click the outline to add one.</li>
+          <li>Double-click or <kbd>C</kbd>: corner ■ / smooth ●.</li>
+          <li><kbd>L</kbd>: straight line to the next node.</li>
+          <li><kbd>Delete</kbd>: remove node (or exclude the shape if no node is selected).</li>
+          <li><kbd>Esc</kbd>: deselect.</li>
+        </ul>
+      </details>
+    </details>
+
+    <details class="sec" open data-key="save"><summary>Save to library</summary>
       <div id="depthCtl"></div>
-      <div class="btns"><button class="b primary" id="addShapes">Add to library</button></div>
+      <div class="savebox" id="saveOne" hidden>
+        <div class="field"><label>Name the selected shape</label><input type="text" id="oneName" value="tool"></div>
+        <div class="btns"><button class="b primary" id="addOne">Add selected</button></div>
+      </div>
+      <div class="savebox">
+        <div class="field"><label>All ticked, prefix</label><input type="text" id="shapeName" value="tool"></div>
+        <ul class="tips"><li>Saved as “prefix + shape name”, e.g. <i id="prefixEx">tool Shape 1</i>.</li></ul>
+        <div class="btns"><button class="b" id="addShapes">Add all ticked (Enter)</button></div>
+      </div>
       <div id="captureInfo" class="info"></div>
-    </section>
-    <details>
-      <summary>Tips for a good photo</summary>
-      <ul>
-        <li>Plain white paper is the most reliable reference. Use tabloid paper or poster board for long tools.</li>
-        <li>Shoot straight down from high up with 2–3× zoom. Close wide-angle shots make tall parts look bigger.</li>
-        <li>Even light, no hard shadows. Spread tools out so they don't touch.</li>
-        <li>Several tools in one photo is fine: each becomes its own shape.</li>
-      </ul>
     </details>
   </div>
 
   <!-- 2. Layout: arrange library shapes in a bin -->
   <div class="panel" id="panel-layout" hidden>
-    <section>
-      <h2>Library</h2>
+    <details class="sec" open data-key="lib"><summary>Library</summary>
+      <div class="btns libbar"><label class="check"><input type="checkbox" id="libAll"> All</label><button class="b" id="libDel" disabled>Delete ticked</button></div>
       <div class="lib" id="lib"></div>
       <p class="hint" id="libEmpty">No shapes yet. Trace some in Capture.</p>
-    </section>
-    <section>
-      <h2>Bin</h2>
+    </details>
+    <details class="sec" open data-key="bin"><summary>Bin</summary>
       <label class="check"><input type="checkbox" id="autoSize" checked> Fit bin to the tools automatically</label>
       <div class="field"><label>Units across × down</label><input type="number" id="nx" value="2" min="1"><input type="number" id="ny" value="1" min="1"></div>
       <div id="binCtls"></div>
       <div class="btns"><button class="b" id="centerAll">Center tools</button><button class="b" id="clearBin">Empty bin</button></div>
-    </section>
-    <section id="selSection" hidden>
-      <h2>Selected</h2>
+    </details>
+    <details class="sec" open id="selSection" hidden><summary>Selected tool</summary>
       <div class="field"><label id="selName">–</label></div>
       <div id="selCtls"></div>
       <div class="btns">
@@ -228,34 +288,49 @@
       <div class="btns"><button class="b" id="dup">Duplicate</button><button class="b" id="del">Remove</button></div>
       <div class="hint" id="axisInfo"></div>
       <div class="btns"><button class="b" id="findAxis">Add symmetry axis</button><button class="b" id="clearAxis" hidden>Remove axis</button></div>
-      <p class="hint">Drag to move, drag the round handle to rotate (hold Shift to snap 15°). Arrow keys nudge, R rotates, Delete removes.</p>
-    </section>
-    <section>
-      <h2>Finger notches</h2>
+      <details class="more"><summary>Moving and rotating</summary>
+        <ul>
+          <li>Drag to move; drag the round handle to rotate (<kbd>Shift</kbd> snaps 15°).</li>
+          <li>Arrows nudge, <kbd>R</kbd> rotates 90°, <kbd>Delete</kbd> removes.</li>
+        </ul>
+      </details>
+    </details>
+    <details class="sec" open data-key="notch"><summary>Finger notches</summary>
       <div class="field"><label>Shape</label><select id="notchShape"><option value="circle">Circle</option><option value="slot">Slot (along the edge)</option></select></div>
       <div id="notchCtls"></div>
       <div id="slotCtl" hidden></div>
       <label class="check"><input type="checkbox" id="notchMirror" checked> Mirror across the tool’s symmetry axis</label>
-      <p class="hint">Pick <b>Notch</b> (N) above the picture. A dashed circle shows where it will go. Near a tool it snaps onto the outline (hold Alt to place freely), belongs to that tool (moves and rotates with it), and is never deeper than the tool. If the tool has a symmetry axis, a mirrored twin is added. Click a notch to remove it (and its twin); drag notches in Select mode.</p>
-    </section>
+      <ul class="tips">
+        <li>Pick <b>Notch</b> (N), then click; it snaps to tool edges.</li>
+        <li>Click a notch to select it; <kbd>Delete</kbd> removes it.</li>
+      </ul>
+      <details class="more"><summary>More about notches</summary>
+        <ul>
+          <li>Hold <kbd>Alt</kbd> to place without snapping.</li>
+          <li>A snapped notch moves and rotates with its tool and is never deeper than it.</li>
+          <li>With a symmetry axis, a mirrored twin is added; deleting one deletes both.</li>
+          <li>In Notch mode, clicking an existing notch removes it.</li>
+        </ul>
+      </details>
+    </details>
     <div id="layoutInfo" class="info"></div>
   </div>
 
   <!-- 3. Generate: mesh, check, preview, download -->
   <div class="panel" id="panel-generate" hidden>
-    <section>
-      <h2>Model</h2>
+    <details class="sec" open data-key="model"><summary>Model</summary>
       <label class="check"><input type="checkbox" id="autoUnits" checked> Height from the deepest pocket</label>
       <div class="field"><label>Height units (7 mm)</label><input type="number" id="units" value="3" min="1"></div>
       <div id="genCtls"></div>
-      <div class="btns"><button class="b primary" id="generate">Generate model</button></div>
+      <div class="btns"><button class="b primary" id="generate">Generate model</button><button class="b" data-reset="genCtls">Restore defaults</button></div>
       <div id="genInfo" class="info"></div>
-    </section>
-    <section>
-      <h2>Download</h2>
+    </details>
+    <details class="sec" open data-key="dl"><summary>Download</summary>
       <div class="downloads" id="downloads"><p class="hint">Generate the model first.</p></div>
-      <p class="hint">Each piece is a standard Gridfinity bin (42 mm grid, 7 mm units). Bins wider than “Max units per print” are split at grid lines and the pocket runs across the join.</p>
-    </section>
+      <details class="more"><summary>About the pieces</summary>
+        <p>Each piece is a standard Gridfinity bin (42 mm grid, 7 mm units). Bins wider than “Max units per print” are split at grid lines; the pocket runs across the join.</p>
+      </details>
+    </details>
   </div>
 </aside>
 <div id="view">
