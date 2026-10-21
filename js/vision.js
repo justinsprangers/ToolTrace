@@ -559,8 +559,9 @@ var TT = window.TT = window.TT || {};
     // A real corner turns sharply over ~4 mm *and* still over ~8 mm; a bite or bump in the trace
     // (from glare or mat lines) only shows up at the short scale.
     var k = Math.max(2, Math.round(Math.max(4, 6 * opt.res) / ds));
-    var ang = turning(pts, k), ang2 = turning(pts, 2 * k), corners = [];
+    var corners = [], ang, ang2;
     if (opt.corner < 180 && m > 8 * k) {
+      ang = turning(pts, k); ang2 = turning(pts, 2 * k);
       for (i = 0; i < m; i++) {
         if (ang[i] < opt.corner || ang2[i] < 0.75 * opt.corner) continue;
         var isMax = true;
@@ -674,79 +675,197 @@ var TT = window.TT = window.TT || {};
     return inside;
   };
 
-  // Outlines of every blob in a mask, as shapes {loops: [outer, holes...], corners, cx, cy, area}
-  // in paper mm (y down). opt: score + threshold (for sub-pixel edges), smooth, straighten, corner
-  // (see TT.cleanLoop).
-  TT.extractShapes = function (mask, wp, opt) {
-    var w = wp.w + 2, h = wp.h + 2, f = new Float32Array(w * h).fill(1), i, j, sc = opt.score, thr = opt.threshold;
-    // Sub-pixel edges: the inside/outside decision comes from the mask, but how far each pixel is
-    // from the edge comes from the colour score (lightly blurred), so the contour lands where the
-    // colour actually changes instead of on the pixel staircase.
+  // ---------- Traced shapes ----------
+
+  // Raw (uncleaned) outlines of every blob in a mask, as shapes {raw: [outer, holes...], cx, cy,
+  // area, inside} in paper mm (y down). `inside` is a point inside the shape, used to recognise
+  // the same shape after a re-trace. Edges are sub-pixel: the inside/outside decision comes from
+  // the mask, how far each pixel is from the edge from the colour score (lightly blurred).
+  TT.traceShapes = function (mask, wp, score, thr) {
+    var w = wp.w + 2, h = wp.h + 2, f = new Float32Array(w * h).fill(1), i, j;
     for (j = 1; j < h - 1; j++) for (i = 1; i < w - 1; i++) {
       var x0 = i - 1, y0 = j - 1, s = 0, c = 0;
       for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
         var x = x0 + dx, y = y0 + dy;
-        if (x >= 0 && y >= 0 && x < wp.w && y < wp.h) { s += sc[y * wp.w + x]; c++; }
+        if (x >= 0 && y >= 0 && x < wp.w && y < wp.h) { s += score[y * wp.w + x]; c++; }
       }
       var mag = Math.min(1, Math.max(0.05, Math.abs(thr - s / c) / thr));
       f[j * w + i] = mask[y0 * wp.w + x0] ? -mag : mag;
     }
-    var cornerList = [];
     var loops = TT.contours(f, w, h).map(function (l) {
-      var mm = l.map(function (p) { return [wp.ox + (p[0] - 0.5) * wp.res, wp.oy + (p[1] - 0.5) * wp.res]; });
-      var cl = TT.cleanLoop(mm, { spacing: Math.min(0.25, wp.res / 2), res: wp.res, smooth: opt.smooth, straighten: opt.straighten, corner: opt.corner });
-      var keep = new Uint8Array(cl.pts.length);
-      cl.corners.forEach(function (k) { keep[k] = 1; });
-      // Thin out points without moving the shape (corners always kept).
-      var pts = simplifyKeep(cl.pts, 0.02, keep);
-      cornerList.push(cl.corners.map(function (k) { return cl.pts[k]; }));
-      pts.corners = cornerList[cornerList.length - 1];
-      return pts;
+      return l.map(function (p) { return [wp.ox + (p[0] - 0.5) * wp.res, wp.oy + (p[1] - 0.5) * wp.res]; });
     }).filter(function (l) { return l.length >= 3 && Math.abs(TT.loopArea(l)) > 4; });
-    var outers = loops.filter(function (l) { return TT.loopArea(l) < 0; });
-    var shapes = outers.map(function (o) {
+    var shapes = loops.filter(function (l) { return TT.loopArea(l) < 0; }).map(function (o) {
       var a = 0, cx = 0, cy = 0;
       for (var k = 0, m = o.length - 1; k < o.length; m = k++) {
         var cr = o[m][0] * o[k][1] - o[k][0] * o[m][1];
         a += cr; cx += (o[m][0] + o[k][0]) * cr; cy += (o[m][1] + o[k][1]) * cr;
       }
-      return { loops: [o], corners: o.corners.slice(), area: Math.abs(a / 2), cx: cx / (3 * a), cy: cy / (3 * a) };
+      return { raw: [o], area: Math.abs(a / 2), cx: cx / (3 * a), cy: cy / (3 * a) };
     });
     loops.forEach(function (l) {
       if (TT.loopArea(l) < 0) return;
       var best = null;
-      shapes.forEach(function (s) { if (TT.pointInLoop(l[0], s.loops[0]) && (!best || s.area < best.area)) best = s; });
-      if (best) { best.loops.push(l); best.corners = best.corners.concat(l.corners); }
+      shapes.forEach(function (s) { if (TT.pointInLoop(l[0], s.raw[0]) && (!best || s.area < best.area)) best = s; });
+      if (best) best.raw.push(l);
     });
+    shapes.forEach(function (s) { s.inside = insidePoint(s.raw); });
     return shapes;
   };
 
-  // Douglas-Peucker that always keeps the flagged points (splits the loop at them first).
-  function simplifyKeep(pts, tol, keep) {
-    var n = pts.length, idx = [];
-    for (var i = 0; i < n; i++) if (keep[i]) idx.push(i);
-    if (idx.length < 2) return TT.simplify(pts, tol);
+  // A point inside the shape (not in a hole): middle of the widest inside run across the shape.
+  function insidePoint(loops) {
+    var b = [Infinity, Infinity, -Infinity, -Infinity];
+    loops[0].forEach(function (p) { b[0] = Math.min(b[0], p[0]); b[1] = Math.min(b[1], p[1]); b[2] = Math.max(b[2], p[0]); b[3] = Math.max(b[3], p[1]); });
+    var best = null, bestW = -1;
+    for (var f = 0.2; f <= 0.81; f += 0.15) {
+      var y = b[1] + (b[3] - b[1]) * f, xs = [];
+      loops.forEach(function (l) {
+        for (var i = 0, j = l.length - 1; i < l.length; j = i++) {
+          var p = l[i], q = l[j];
+          if ((p[1] > y) !== (q[1] > y)) xs.push(p[0] + (y - p[1]) * (q[0] - p[0]) / (q[1] - p[1]));
+        }
+      });
+      xs.sort(function (u, v) { return u - v; });
+      for (var k = 0; k + 1 < xs.length; k += 2) if (xs[k + 1] - xs[k] > bestW) { bestW = xs[k + 1] - xs[k]; best = [(xs[k] + xs[k + 1]) / 2, y]; }
+    }
+    return best || [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
+  }
+
+  // ---------- Node paths ----------
+  // An outline is a closed list of nodes {x, y, c, s}: c = true for a corner (sharp), false for a
+  // smooth point; s = true if the segment to the next node is a straight line. Other segments are
+  // cubic Hermite curves; tangents at smooth nodes follow the neighbours (Catmull-Rom, scaled by
+  // segment length so uneven spacing doesn't overshoot), or the straight segment next to them so a
+  // straight edge flows into a curve without a kink. At a corner the tangent points at the neighbour.
+
+  function segTangents(nodes, k) {
+    var n = nodes.length, P = nodes[(k - 1 + n) % n], A = nodes[k], B = nodes[(k + 1) % n], Q = nodes[(k + 2) % n];
+    var L = Math.hypot(B.x - A.x, B.y - A.y), m0, m1, d;
+    if (A.s) return { A: A, B: B, L: L, m0: [B.x - A.x, B.y - A.y], m1: [B.x - A.x, B.y - A.y] };
+    if (A.c) m0 = [B.x - A.x, B.y - A.y];
+    else if (P.s) { d = Math.hypot(A.x - P.x, A.y - P.y) || 1; m0 = [(A.x - P.x) * L / d, (A.y - P.y) * L / d]; }
+    else { var s0 = L / ((Math.hypot(A.x - P.x, A.y - P.y) + L) || 1); m0 = [(B.x - P.x) * s0, (B.y - P.y) * s0]; }
+    if (B.c) m1 = [B.x - A.x, B.y - A.y];
+    else if (B.s) { d = Math.hypot(Q.x - B.x, Q.y - B.y) || 1; m1 = [(Q.x - B.x) * L / d, (Q.y - B.y) * L / d]; }
+    else { var s1 = L / ((L + Math.hypot(Q.x - B.x, Q.y - B.y)) || 1); m1 = [(Q.x - A.x) * s1, (Q.y - A.y) * s1]; }
+    return { A: A, B: B, L: L, m0: m0, m1: m1 };
+  }
+
+  function hermite(s, t) {
+    var t2 = t * t, t3 = t2 * t, h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t, h01 = -2 * t3 + 3 * t2, h11 = t3 - t2;
+    return [h00 * s.A.x + h10 * s.m0[0] + h01 * s.B.x + h11 * s.m1[0], h00 * s.A.y + h10 * s.m0[1] + h01 * s.B.y + h11 * s.m1[1]];
+  }
+
+  // Points along segment k (node k to k+1), `step` mm apart, without the end point.
+  TT.segmentPoints = function (nodes, k, step) {
+    var s = segTangents(nodes, k), m = Math.max(1, Math.ceil(s.L / step)), out = [];
+    for (var i = 0; i < m; i++) out.push(hermite(s, i / m));
+    return out;
+  };
+
+  // The whole closed path as points.
+  TT.nodePath = function (nodes, step) {
     var out = [];
-    idx.forEach(function (s, k) {
-      var e = idx[(k + 1) % idx.length], run = [];
-      for (var j = s; ; j = (j + 1) % n) { run.push(pts[j]); if (j === e && run.length > 1) break; }
-      out.push.apply(out, simplifyOpen(run, tol).slice(0, -1));
-    });
+    for (var k = 0; k < nodes.length; k++) out.push.apply(out, TT.segmentPoints(nodes, k, step));
+    return out;
+  };
+
+  // Douglas-Peucker on an open run of a closed point list (indices a..b, wrapping); returns the
+  // indices kept strictly between a and b.
+  function dpIdx(pts, a, b, tol) {
+    var n = pts.length, out = [], stack = [[a, b]];
+    while (stack.length) {
+      var sg = stack.pop(), s = sg[0], e = sg[1], A = pts[s % n], B = pts[e % n];
+      var vx = B[0] - A[0], vy = B[1] - A[1], len = Math.hypot(vx, vy) || 1e-12, md = -1, mi = -1;
+      for (var i = s + 1; i < e; i++) {
+        var p = pts[i % n], d = Math.abs((p[0] - A[0]) * vy - (p[1] - A[1]) * vx) / len;
+        if (d > md) { md = d; mi = i; }
+      }
+      if (md > tol) { out.push(mi); stack.push([s, mi], [mi, e]); }
+    }
     return out;
   }
 
-  function simplifyOpen(p, tol) {
-    var n = p.length, keep = new Uint8Array(n), stack = [[0, n - 1]];
-    keep[0] = keep[n - 1] = 1;
-    while (stack.length) {
-      var sg = stack.pop(), s = sg[0], e = sg[1], A = p[s], B = p[e];
-      var vx = B[0] - A[0], vy = B[1] - A[1], len = Math.hypot(vx, vy) || 1e-12, md = -1, mi = -1;
-      for (var i = s + 1; i < e; i++) {
-        var d = Math.abs((p[i][0] - A[0]) * vy - (p[i][1] - A[1]) * vx) / len;
-        if (d > md) { md = d; mi = i; }
-      }
-      if (md > tol) { keep[mi] = 1; stack.push([s, mi], [mi, e]); }
+  // Fit editable nodes to a raw traced loop. set: {smooth, straighten, corner, fit} (see
+  // TT.cleanLoop; fit = how closely the node path must follow the cleaned outline, mm). Corners
+  // come from the cleanup; smooth nodes are added where the path strays more than `fit` until it
+  // follows the outline, so gentle curves get few nodes.
+  TT.fitNodes = function (raw, set, res) {
+    var cl = TT.cleanLoop(raw, { spacing: Math.min(0.25, res / 2), res: res, smooth: set.smooth, straighten: 0, corner: set.corner });
+    var pts = cl.pts, n = pts.length, isC = new Uint8Array(n), idx = cl.corners.slice();
+    idx.forEach(function (i) { isC[i] = 1; });
+    if (!idx.length) {
+      var far = 0, fd = -1;
+      for (var i = 1; i < n; i++) { var d = Math.hypot(pts[i][0] - pts[0][0], pts[i][1] - pts[0][1]); if (d > fd) { fd = d; far = i; } }
+      idx = [0, far];
     }
-    return p.filter(function (_, i) { return keep[i]; });
+    // Start from a coarse simplification between the fixed points, at the straight-snap tolerance:
+    // runs straight to within it get no nodes in between (two corners = a straight line).
+    var tol0 = Math.max(set.fit, set.straighten || 0), start = idx.slice();
+    idx.forEach(function (s, k) {
+      var e = idx[(k + 1) % idx.length]; if (e <= s) e += n;
+      dpIdx(pts, s, e, 3 * tol0).forEach(function (j) { start.push(j % n); });
+    });
+    var set1 = {};
+    start.forEach(function (j) { set1[j] = 1; });
+    var keys = Object.keys(set1).map(Number).sort(function (a, b) { return a - b; });
+    var straight = {}; // node index -> the segment after it is a straight line
+    function build() { return keys.map(function (j) { return { x: pts[j][0], y: pts[j][1], c: !!isC[j], s: !!straight[j], i: j }; }); }
+    // Runs that are straight to within the snap tolerance, at least 10 mm long and not bowed
+    // become straight segments.
+    if (set.straighten > 0) {
+      var nodes0 = build();
+      nodes0.forEach(function (nd, k) {
+        var nx = nodes0[(k + 1) % nodes0.length], a = nd.i, b = nx.i; if (b <= a) b += n;
+        var len = Math.hypot(nx.x - nd.x, nx.y - nd.y);
+        if (len >= Math.max(10, 20 * set.straighten) && !dpIdx(pts, a, b, set.straighten).length && !bows(pts, a, b, set.straighten)) straight[nd.i] = 1;
+      });
+    }
+    // Add nodes where the path strays from the outline (straight segments are left alone).
+    // Each round adds the worst point of every segment that strays too far.
+    for (var it = 0; it < 30; it++) {
+      var nodes = build(), added = [];
+      for (var k2 = 0; k2 < nodes.length; k2++) {
+        var a2 = nodes[k2].i, b2 = nodes[(k2 + 1) % nodes.length].i; if (b2 <= a2) b2 += n;
+        if (b2 - a2 < 2 || nodes[k2].s) continue;
+        var seg = TT.segmentPoints(nodes, k2, 0.25), worst = -1, worstD = set.fit;
+        seg.push([nodes[(k2 + 1) % nodes.length].x, nodes[(k2 + 1) % nodes.length].y]);
+        for (var j2 = a2 + 1; j2 < b2; j2 += 2) {
+          var p = pts[j2 % n], md = Infinity;
+          for (var q = 0; q < seg.length; q++) {
+            var ddx = seg[q][0] - p[0], ddy = seg[q][1] - p[1], dd = ddx * ddx + ddy * ddy;
+            if (dd < md) md = dd;
+          }
+          md = Math.sqrt(md);
+          if (md > worstD) { worstD = md; worst = j2 % n; }
+        }
+        if (worst >= 0) added.push(worst);
+      }
+      if (!added.length) break;
+      keys = keys.concat(added).sort(function (a, b) { return a - b; });
+    }
+    return build().map(function (nd) { return { x: +nd.x.toFixed(3), y: +nd.y.toFixed(3), c: nd.c, s: nd.s }; });
+  };
+
+  // True if the run a..b bows consistently to one side by more than tol/3 (a gentle curve).
+  function bows(pts, a, b, tol) {
+    var n = pts.length, A = pts[a % n], B = pts[b % n], vx = B[0] - A[0], vy = B[1] - A[1], len = Math.hypot(vx, vy) || 1e-9, sum = 0;
+    for (var i = a + 1; i < b; i++) sum += ((pts[i % n][0] - A[0]) * vy - (pts[i % n][1] - A[1]) * vx) / len;
+    return b - a > 1 && Math.abs(sum / (b - a - 1)) > tol / 3;
   }
+
+  // Nearest point on a node path to p: {k: segment, t, d: distance, pt}.
+  TT.nearestOnPath = function (nodes, p) {
+    var best = { d: Infinity };
+    for (var k = 0; k < nodes.length; k++) {
+      var s = segTangents(nodes, k), m = Math.max(8, Math.ceil(s.L / 0.5));
+      for (var i = 0; i <= m; i++) {
+        var q = hermite(s, i / m), d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+        if (d < best.d) best = { k: k, t: i / m, d: d, pt: q };
+      }
+    }
+    return best;
+  };
+
 })();

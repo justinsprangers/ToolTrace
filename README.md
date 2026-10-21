@@ -20,13 +20,24 @@ It works in three steps (tabs at the top).
    - **Smart remove (R):** paint over something wrongly included, e.g. the mat between snip handles. It spreads to the same colour and only ever removes.
    - **Smart colour match** and **Smart reach** control how far a smart stroke spreads.
    - **Brush keep / Brush erase (B / E):** change exactly the pixels you paint.
-   - **Pick shape (X):** click a shape to leave it out (grey); click it again to bring it back.
    - **[ ]** change the brush size, **Ctrl+Z / Ctrl+Y** undo and redo. Strokes are drawn faintly in their tool colour.
-5. **Outline:** cleans up noise in the trace without changing the real shape.
-   - Corners are found first (cyan dots) and kept sharp. **Keep corners sharper than** sets which bends count as corners.
-   - **Smooth noise** fits a gentle curve along each stretch between corners. It ignores small bites and bumps (glare, mat lines) instead of averaging them in, and curves keep their curvature. 4 mm suits most tools; lower it for small detailed parts.
-   - **Snap straight edges** turns runs that are straight within that tolerance into exact lines. Gentle curves are left alone, so arcs don't turn into facets.
-6. **Save outlines:** give them a name and a default pocket depth, then **Add to library**. Every traced shape becomes its own library entry.
+5. **Shapes:** every traced shape becomes an outline made of **nodes**: square = corner (sharp), round = smooth (the outline curves through it).
+   - The **Shapes** list shows every shape. Untick one (or select it and press **X**) to leave it out.
+   - Click a shape (**Select** tool, **V**) to select it and show its nodes.
+   - **Edit the nodes:**
+     - Drag a node to move it.
+     - Click the outline to add a node.
+     - Double-click a node (or **C**) to switch it between corner and smooth.
+     - **L** makes the segment after the selected node an exact straight line.
+     - **Delete** removes a node.
+   - **Own outline settings** gives the selected shape its own Smooth / Snap / Corner / Node detail, without touching the others. **Re-fit nodes** throws away hand edits.
+   - Hand edits and per-shape settings survive re-tracing (changing Sensitivity, brush fixes, etc.).
+   - **Outline settings for all shapes** (in the Shapes section) are the defaults:
+     - **Keep corners sharper than:** which bends count as corners.
+     - **Smooth noise:** ignores small bites and bumps (glare, mat lines) between corners, and curves keep their curvature. 4 mm suits most tools.
+     - **Snap straight edges:** straight runs become exact lines; gentle curves stay curves.
+     - **Node detail:** how far the outline may stray from the trace before another node is added. Lower means more nodes.
+6. **Save outlines:** give them a name and a default pocket depth, then **Add to library** (or press Enter). Every ticked shape becomes its own library entry.
 
 Press **?** (or **Shortcuts** above the picture) for every keyboard shortcut.
 

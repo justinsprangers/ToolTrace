@@ -70,6 +70,14 @@
   details summary { cursor: pointer; font-weight: 600; }
   details li { margin: 4px 0; }
   .downloads { display: flex; flex-direction: column; gap: 6px; }
+  .shapelist { display: flex; flex-direction: column; gap: 3px; max-height: 260px; overflow-y: auto; }
+  .shaperow { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 5px; cursor: pointer; border: 1px solid transparent; }
+  .shaperow:hover { background: #f4f4f2; }
+  .shaperow.on { border-color: #1c7ed6; background: #eef5fd; }
+  .shaperow.off span { color: var(--mute); text-decoration: line-through; }
+  .shaperow small { color: var(--mute); margin-left: 4px; }
+  details.sub { padding: 6px 0 0; }
+  details.sub summary { font-weight: 500; font-size: 13px; }
   #toolbar .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
   #toolbar .brush { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--mute); }
   #toolbar .brush input { width: 90px; accent-color: var(--accent); }
@@ -150,13 +158,26 @@
     </section>
     <section>
       <h2>Fix up</h2>
-      <p class="hint">Tools above the Trace view: <b>Smart keep</b> (K) paints over a missed part and spreads to the same colour; <b>Smart remove</b> (R) does the same for a wrong area, e.g. the mat between snip handles. Smart keep only adds and smart remove only removes. <b>Brush keep / erase</b> (B / E) change exactly what you paint. <b>Pick shape</b> (X) leaves a whole shape out. [ and ] change the brush size; Ctrl+Z undoes.</p>
+      <p class="hint">Tools above the Trace view: <b>Smart keep</b> (K) paints over a missed part and spreads to the same colour; <b>Smart remove</b> (R) does the same for a wrong area, e.g. the mat between snip handles. Smart keep only adds and smart remove only removes. <b>Brush keep / erase</b> (B / E) change exactly what you paint. [ and ] change the brush size; Ctrl+Z undoes. <b>Select</b> (V) is for shapes and nodes, below.</p>
       <div id="brushCtl"></div>
     </section>
     <section>
-      <h2>Outline</h2>
-      <p class="hint">Cyan dots are corners that stay sharp. Smoothing only removes noise between them, and straight runs snap to exact lines while curves stay curves.</p>
-      <div id="outlineCtls"></div>
+      <h2>Shapes</h2>
+      <p class="hint">Untick a shape to leave it out. Click one (here or on the picture) to select it and edit its nodes.</p>
+      <div class="shapelist" id="shapeList"></div>
+      <details class="sub"><summary>Outline settings for all shapes</summary>
+        <p class="hint">Corners (cyan) stay sharp. Smoothing only removes noise between them; straight runs become exact lines and curves stay curves. Node detail sets how closely the nodes follow the traced edge.</p>
+        <div id="outlineCtls"></div>
+      </details>
+    </section>
+    <section id="shapeSel" hidden>
+      <h2 id="shTitle">Shape</h2>
+      <label class="check"><input type="checkbox" id="shOff"> Include this shape</label>
+      <label class="check"><input type="checkbox" id="shOwn"> Own outline settings</label>
+      <div id="shapeCtls" hidden></div>
+      <div class="btns"><button class="b" id="shRefit" title="Throw away hand edits and fit the nodes again">Re-fit nodes</button></div>
+      <div class="info" id="shInfo"></div>
+      <p class="hint"><b>Nodes:</b> drag to move. Click the outline to add a node. Double-click a node (or <kbd>C</kbd>) to switch corner ■ / smooth ●. <kbd>L</kbd> makes the segment after the selected node a straight line. <kbd>Delete</kbd> removes it. <kbd>X</kbd> includes / leaves out the shape. <kbd>Esc</kbd> deselects.</p>
     </section>
     <section>
       <h2>Save outlines</h2>
@@ -247,11 +268,17 @@
   <h3>Capture</h3>
   <table>
     <tr><td><kbd>1</kbd> / <kbd>2</kbd></td><td>Photo view / Trace view</td></tr>
+    <tr><td><kbd>V</kbd></td><td>Select shapes and nodes</td></tr>
+    <tr><td><kbd>X</kbd></td><td>Include / leave out the selected shape</td></tr>
+    <tr><td>Drag a node / click the outline</td><td>Move a node / add a node</td></tr>
+    <tr><td><kbd>C</kbd> or double-click a node</td><td>Switch node between corner and smooth</td></tr>
+    <tr><td><kbd>L</kbd></td><td>Straight line from the selected node to the next</td></tr>
+    <tr><td><kbd>Delete</kbd></td><td>Delete the selected node</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Deselect node, then shape, then Pan tool</td></tr>
     <tr><td><kbd>K</kbd></td><td>Smart keep</td></tr>
     <tr><td><kbd>R</kbd></td><td>Smart remove</td></tr>
     <tr><td><kbd>B</kbd> / <kbd>E</kbd></td><td>Brush keep / brush erase</td></tr>
-    <tr><td><kbd>X</kbd></td><td>Pick shape (leave out / bring back)</td></tr>
-    <tr><td><kbd>P</kbd> or <kbd>Esc</kbd></td><td>Pan tool</td></tr>
+    <tr><td><kbd>P</kbd></td><td>Pan tool</td></tr>
     <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Smaller / bigger brush</td></tr>
     <tr><td><kbd>Enter</kbd></td><td>Add outlines to the library</td></tr>
   </table>
