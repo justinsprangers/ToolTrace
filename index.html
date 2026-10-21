@@ -5,126 +5,224 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ToolTrace</title>
 <style>
-  :root { --bg: #f4f4f2; --panel: #fff; --ink: #222; --mute: #6b6b6b; --line: #ddd; --accent: #e8590c; --warn: #b42318; }
+  :root { --bg: #f2f2ef; --panel: #fff; --ink: #1f1f1f; --mute: #6b6b6b; --line: #dcdcd8; --accent: #e8590c; --accent-soft: #fdeee6; --warn: #b42318; --ok: #2b8a3e; }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
-  header { display: flex; align-items: baseline; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
-  header h1 { font-size: 18px; margin: 0; }
-  header span { color: var(--mute); }
-  main { display: grid; grid-template-columns: 340px 1fr; height: calc(100% - 45px); }
-  aside { overflow-y: auto; border-right: 1px solid var(--line); background: var(--panel); padding: 8px 14px 30px; }
-  section { border-bottom: 1px solid var(--line); padding: 8px 0 12px; }
-  h2 { font-size: 14px; margin: 6px 0 8px; }
-  label.row { display: grid; grid-template-columns: 130px 1fr 48px; align-items: center; gap: 6px; margin: 5px 0; }
-  label.row output { text-align: right; color: var(--mute); font-variant-numeric: tabular-nums; }
-  label.row input[type=number], label.row select, label.row input[type=text] { grid-column: span 2; width: 100%; padding: 3px 5px; }
-  label.check { display: block; margin: 5px 0; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; }
+  button, input, select { font: inherit; }
+  header { display: flex; align-items: center; gap: 14px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; }
+  .phases { display: flex; gap: 4px; }
+  .phases button { border: 1px solid var(--line); background: #fafafa; border-radius: 18px; padding: 5px 14px; cursor: pointer; }
+  .phases button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .phases button b { display: inline-block; width: 18px; height: 18px; line-height: 18px; border-radius: 50%; background: rgba(0,0,0,.08); font-size: 12px; text-align: center; margin-right: 6px; }
+  .phases button.on b { background: rgba(255,255,255,.2); }
+  header .spacer { flex: 1; }
+  main { display: grid; grid-template-columns: 370px 1fr; height: calc(100% - 51px); }
+  aside { overflow-y: auto; border-right: 1px solid var(--line); background: var(--panel); padding: 4px 16px 40px; }
+  .panel[hidden] { display: none; }
+  section { border-bottom: 1px solid var(--line); padding: 10px 0 12px; }
+  section:last-child { border-bottom: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--mute); margin: 4px 0 8px; }
+  .ctl { margin: 7px 0; }
+  .ctl .top { display: flex; align-items: center; gap: 6px; }
+  .ctl .top label { flex: 1; }
+  .ctl input[type=number] { width: 78px; padding: 3px 6px; text-align: right; border: 1px solid #ccc; border-radius: 4px; }
+  .ctl .unit { width: 30px; color: var(--mute); font-size: 12px; }
+  .ctl input[type=range] { width: 100%; margin: 3px 0 0; accent-color: var(--accent); }
+  .field { display: flex; align-items: center; gap: 6px; margin: 7px 0; }
+  .field > label { flex: 1; }
+  .field select, .field input[type=text] { flex: 1.3; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; min-width: 0; }
+  .field input[type=number] { width: 78px; padding: 3px 6px; text-align: right; border: 1px solid #ccc; border-radius: 4px; }
+  .check { display: flex; align-items: center; gap: 6px; margin: 7px 0; }
   .btns { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
-  button { padding: 5px 10px; border: 1px solid #bbb; border-radius: 5px; background: #fafafa; cursor: pointer; font: inherit; }
-  button:hover { background: #f0f0f0; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button.on { background: #333; color: #fff; border-color: #333; }
-  .hint { color: var(--mute); font-size: 12.5px; margin: 4px 0; }
-  .info { font-size: 13px; background: #f7f7f5; border-radius: 5px; padding: 6px 8px; margin-top: 6px; white-space: pre-line; }
+  button.b { padding: 5px 11px; border: 1px solid #bbb; border-radius: 5px; background: #fafafa; cursor: pointer; }
+  button.b:hover { background: #f0f0f0; }
+  button.b.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.b.primary:hover { background: #d9480f; }
+  button.b:disabled { opacity: .45; cursor: default; }
+  .seg { display: flex; border: 1px solid #bbb; border-radius: 6px; overflow: hidden; margin: 6px 0; }
+  .seg button { flex: 1; border: 0; background: #fafafa; padding: 6px 4px; cursor: pointer; border-right: 1px solid #ddd; }
+  .seg button:last-child { border-right: 0; }
+  .seg button.on { background: var(--ink); color: #fff; }
+  .hint { color: var(--mute); font-size: 12.5px; margin: 5px 0; }
+  .info { font-size: 13px; background: #f7f7f5; border-radius: 6px; padding: 7px 9px; margin-top: 8px; white-space: pre-line; }
+  .info:empty { display: none; }
   .warn { color: var(--warn); }
+  .ok { color: var(--ok); }
+  .lib { display: flex; flex-direction: column; gap: 6px; }
+  .libitem { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 6px; padding: 5px; }
+  .libitem canvas { width: 64px; height: 44px; background: #f4f4f2; border-radius: 4px; flex: none; }
+  .libitem .meta { flex: 1; min-width: 0; }
+  .libitem input { width: 100%; border: 1px solid transparent; padding: 2px 4px; border-radius: 4px; }
+  .libitem input:hover, .libitem input:focus { border-color: #ccc; }
+  .libitem small { color: var(--mute); padding-left: 4px; }
+  .libitem button { border: 1px solid #ccc; background: #fafafa; border-radius: 4px; cursor: pointer; padding: 3px 8px; }
   #view { position: relative; display: flex; flex-direction: column; min-width: 0; }
-  #tabs { display: flex; gap: 4px; padding: 8px; }
-  #tabs button.on { background: #333; }
-  #cv { flex: 1; width: 100%; min-height: 0; touch-action: none; display: block; }
-  #status { padding: 6px 10px; font-size: 13px; color: var(--mute); border-top: 1px solid var(--line); background: var(--panel); min-height: 30px; }
-  details { padding: 8px 0; }
+  #toolbar { display: flex; gap: 6px; padding: 8px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--line); background: #fbfbfa; }
+  #toolbar .seg { margin: 0; }
+  #toolbar .seg button { padding: 4px 10px; }
+  #toolbar .sep { width: 1px; height: 22px; background: var(--line); }
+  #cv { flex: 1; width: 100%; min-height: 0; touch-action: none; display: block; outline: none; }
+  #status { padding: 6px 12px; font-size: 13px; color: var(--mute); border-top: 1px solid var(--line); background: var(--panel); min-height: 31px; }
+  #status.warn { color: var(--warn); }
+  #busy { position: absolute; top: 56px; right: 12px; background: rgba(0,0,0,.75); color: #fff; padding: 4px 10px; border-radius: 12px; font-size: 12px; }
+  details { padding: 10px 0; }
   details summary { cursor: pointer; font-weight: 600; }
-  details li { margin: 3px 0; }
-  @media (max-width: 760px) {
-    main { grid-template-columns: 1fr; grid-template-rows: auto 70vh; height: auto; }
+  details li { margin: 4px 0; }
+  .downloads { display: flex; flex-direction: column; gap: 6px; }
+  @media (max-width: 820px) {
+    main { grid-template-columns: 1fr; grid-template-rows: auto 75vh; height: auto; }
     aside { border-right: 0; }
-    #view { height: 70vh; }
+    #view { height: 75vh; }
   }
 </style>
 </head>
 <body>
-<header><h1>ToolTrace</h1><span>photo of a tool → Gridfinity bin with a pocket</span></header>
+<header>
+  <h1>ToolTrace</h1>
+  <div class="phases">
+    <button data-phase="capture" class="on"><b>1</b>Capture</button>
+    <button data-phase="layout"><b>2</b>Layout</button>
+    <button data-phase="generate"><b>3</b>Generate</button>
+  </div>
+  <div class="spacer"></div>
+  <button class="b" id="saveProject">Save project</button>
+  <button class="b" id="openProject">Open project</button>
+  <input type="file" id="projectFile" accept=".json,application/json" hidden>
+</header>
 <main>
 <aside>
-  <section>
-    <h2>1. Photo</h2>
-    <input type="file" id="file" accept="image/*">
-    <label class="row"><span>Reference</span>
-      <select id="ref">
-        <option value="215.9x279.4">Letter paper (8.5 × 11 in)</option>
-        <option value="215.9x355.6">Legal paper (8.5 × 14 in)</option>
-        <option value="279.4x431.8">Tabloid paper (11 × 17 in)</option>
-        <option value="210x297">A4 paper</option>
-        <option value="297x420">A3 paper</option>
-        <option value="custom">Custom rectangle…</option>
-      </select></label>
-    <div id="customRef" hidden>
-      <label class="row"><span>Width</span><input type="number" id="refW" value="10" step="0.01" min="1"></label>
-      <label class="row"><span>Height</span><input type="number" id="refH" value="12" step="0.01" min="1"></label>
-      <label class="row"><span>Units</span><select id="refUnit"><option value="25.4">inches</option><option value="1">mm</option></select></label>
-    </div>
-    <label class="row"><span>Extend past it</span><input type="range" id="ext" min="0" max="150" step="5" value="0"><output></output></label>
-    <div class="btns"><button id="autoPaper">Auto-find paper</button><button id="resetCorners">Reset corners</button></div>
-    <p class="hint">Drag the 4 orange handles onto the corners of the reference rectangle (any order). Use “Extend past it” (mm) if the tool hangs over its edge, e.g. when using grid points on a cutting mat.</p>
-  </section>
+  <!-- 1. Capture: photo -> flattened image -> traced outlines -> library -->
+  <div class="panel" id="panel-capture">
+    <section>
+      <h2>Photo</h2>
+      <input type="file" id="file" accept="image/*">
+    </section>
+    <section>
+      <h2>Scale reference</h2>
+      <div class="seg" id="refMode">
+        <button data-mode="paper" class="on">Paper</button>
+        <button data-mode="grid">Grid mat</button>
+        <button data-mode="points">4 points</button>
+      </div>
+      <div data-ref="paper">
+        <div class="field"><label>Paper size</label>
+          <select id="paperSize">
+            <option value="215.9x279.4">Letter (8.5 × 11 in)</option>
+            <option value="215.9x355.6">Legal (8.5 × 14 in)</option>
+            <option value="279.4x431.8">Tabloid (11 × 17 in)</option>
+            <option value="210x297">A4</option>
+            <option value="297x420">A3</option>
+          </select></div>
+        <div class="btns"><button class="b" id="findPaper">Find paper</button></div>
+        <p class="hint">Drag the 4 handles onto the paper corners if they're off. Scroll to zoom, right-drag to pan.</p>
+      </div>
+      <div data-ref="grid" hidden>
+        <div class="field"><label>Grid square size</label><input type="number" id="gridSize" value="0.5" step="0.0625" min="0.01"><select id="gridUnit" style="flex:0 0 70px"><option value="25.4">in</option><option value="10">cm</option><option value="1">mm</option></select></div>
+        <div class="field"><label>Squares across × down</label><input type="number" id="gridNx" value="20" min="1"><input type="number" id="gridNy" value="12" min="1"></div>
+        <div class="btns"><button class="b" id="detectGrid">Detect grid</button></div>
+        <p class="hint">“Detect grid” finds the mat lines and fills in the handles and square counts. If it can't, put the handles on 4 grid crossings and type how many squares are between them. The handles snap to the nearest crossings. Measure the size of the smallest squares on your mat.</p>
+      </div>
+      <div data-ref="points" hidden>
+        <div class="field"><label>Rectangle width × height</label><input type="number" id="ptsW" value="10" step="0.01"><input type="number" id="ptsH" value="12" step="0.01"></div>
+        <div class="field"><label>Units</label><select id="ptsUnit"><option value="25.4">inches</option><option value="1">mm</option></select></div>
+        <p class="hint">Drag the 4 handles onto the corners of any rectangle of known size.</p>
+      </div>
+      <div id="extendCtl"></div>
+      <div id="refInfo" class="info"></div>
+    </section>
+    <section>
+      <h2>Trace</h2>
+      <div id="traceCtls"></div>
+      <label class="check"><input type="checkbox" id="fillHoles" checked> Fill holes inside outlines</label>
+      <p class="hint">Picks up shadows or grid lines → raise Sensitivity or lower Brightness weight. Misses shiny or pale parts → lower Sensitivity. Tools merging → lower Bridge gaps.</p>
+    </section>
+    <section>
+      <h2>Fix up</h2>
+      <p class="hint">Use the tools above the picture (Trace view): <b>Pick</b> clicks a shape to leave it out, <b>Erase</b> paints away areas (e.g. between handles), <b>Add</b> paints in missed parts.</p>
+      <div id="brushCtl"></div>
+      <div class="btns"><button class="b" id="clearEdits">Clear edits</button></div>
+      <div id="outlineCtls"></div>
+    </section>
+    <section>
+      <h2>Save outlines</h2>
+      <div class="field"><label>Name</label><input type="text" id="shapeName" value="tool"></div>
+      <div id="depthCtl"></div>
+      <div class="btns"><button class="b primary" id="addShapes">Add to library</button></div>
+      <div id="captureInfo" class="info"></div>
+    </section>
+    <details>
+      <summary>Tips for a good photo</summary>
+      <ul>
+        <li>Plain white paper is the most reliable reference. Use tabloid paper or poster board for long tools.</li>
+        <li>Shoot straight down from high up with 2–3× zoom. Close wide-angle shots make tall parts look bigger.</li>
+        <li>Even light, no hard shadows. Spread tools out so they don't touch.</li>
+        <li>Several tools in one photo is fine: each becomes its own shape.</li>
+      </ul>
+    </details>
+  </div>
 
-  <section>
-    <h2>2. Trace</h2>
-    <label class="row"><span>Sensitivity</span><input type="range" id="threshold" min="0.05" max="1.5" step="0.01" value="0.35"><output></output></label>
-    <label class="row"><span>Brightness weight</span><input type="range" id="lumWeight" min="0" max="3" step="0.05" value="1"><output></output></label>
-    <label class="row"><span>Remove lines (mm)</span><input type="range" id="open" min="0" max="3" step="0.25" value="0.75"><output></output></label>
-    <label class="row"><span>Bridge gaps (mm)</span><input type="range" id="close" min="0" max="6" step="0.25" value="1.5"><output></output></label>
-    <label class="row"><span>Min area (mm²)</span><input type="range" id="minArea" min="0" max="5000" step="50" value="300"><output></output></label>
-    <label class="row"><span>Ignore edge (mm)</span><input type="range" id="margin" min="1" max="30" step="1" value="3"><output></output></label>
-    <label class="check"><input type="checkbox" id="fillHoles" checked> Fill holes inside the outline</label>
-    <p class="hint">Lower “Sensitivity” picks up more (shiny metal, pale parts); raise it if shadows or grid lines get traced. Lower “Brightness weight” to ignore shadows.</p>
-  </section>
+  <!-- 2. Layout: arrange library shapes in a bin -->
+  <div class="panel" id="panel-layout" hidden>
+    <section>
+      <h2>Library</h2>
+      <div class="lib" id="lib"></div>
+      <p class="hint" id="libEmpty">No shapes yet. Trace some in Capture.</p>
+    </section>
+    <section>
+      <h2>Bin</h2>
+      <label class="check"><input type="checkbox" id="autoSize" checked> Fit bin to the tools automatically</label>
+      <div class="field"><label>Units across × down</label><input type="number" id="nx" value="2" min="1"><input type="number" id="ny" value="1" min="1"></div>
+      <div id="binCtls"></div>
+      <div class="btns"><button class="b" id="centerAll">Center tools</button><button class="b" id="clearBin">Empty bin</button></div>
+    </section>
+    <section id="selSection" hidden>
+      <h2>Selected</h2>
+      <div class="field"><label id="selName">–</label></div>
+      <div id="selCtls"></div>
+      <div class="btns">
+        <button class="b" id="rotL">⟲ 90°</button><button class="b" id="rotR">⟳ 90°</button><button class="b" id="rotAuto">Straighten</button><button class="b" id="flip">Flip</button>
+      </div>
+      <div class="btns"><button class="b" id="dup">Duplicate</button><button class="b" id="del">Remove</button></div>
+      <p class="hint">Drag to move, drag the round handle to rotate (hold Shift to snap 15°). Arrow keys nudge, R rotates, Delete removes.</p>
+    </section>
+    <section>
+      <h2>Finger notches</h2>
+      <div id="notchCtls"></div>
+      <p class="hint">Pick “Notch” above the picture, then click to add one. Click a notch again to remove it. Notches can be dragged in Select mode.</p>
+    </section>
+    <div id="layoutInfo" class="info"></div>
+  </div>
 
-  <section>
-    <h2>3. Bin</h2>
-    <label class="row"><span>Clearance (mm)</span><input type="range" id="clearance" min="0" max="4" step="0.1" value="1"><output></output></label>
-    <label class="row"><span>Pocket depth (mm)</span><input type="number" id="depth" value="15" min="1" step="0.5"></label>
-    <label class="row"><span>Rotation (°)</span><input type="number" id="rot" value="0" step="0.5"></label>
-    <div class="btns"><button id="autoRot">Auto-rotate</button><button id="center">Re-center</button><button id="flip">Turn 90°</button></div>
-    <label class="row"><span>Min wall (mm)</span><input type="number" id="wall" value="2" min="0" step="0.5"></label>
-    <label class="check"><input type="checkbox" id="autoUnits" checked> Auto size</label>
-    <label class="row"><span>Units X × Y</span><input type="number" id="nx" value="2" min="1" style="grid-column:auto"><input type="number" id="ny" value="1" min="1" style="grid-column:auto;width:100%"></label>
-    <label class="row"><span>Height units (7 mm)</span><input type="number" id="units" value="3" min="1"></label>
-    <label class="row"><span>Max units per print</span><input type="number" id="maxUnits" value="6" min="1"></label>
-    <h2>Finger notches</h2>
-    <label class="row"><span>Diameter (mm)</span><input type="range" id="notchD" min="10" max="40" step="1" value="22"><output></output></label>
-    <div class="btns"><button id="modeMove" class="on">Drag moves tool</button><button id="modeNotch">Click adds notch</button><button id="clearNotches">Clear notches</button></div>
-    <p class="hint">In notch mode, click inside the bin to add a notch and click a notch to remove it.</p>
-    <div id="binInfo" class="info"></div>
-  </section>
-
-  <section>
-    <h2>4. Export</h2>
-    <label class="row"><span>Name</span><input type="text" id="name" value="tool"></label>
-    <div class="btns"><button id="exportStl" class="primary">Download STL</button><button id="exportSvg">Download SVG outline</button></div>
-    <p class="hint">Long bins are split into pieces no wider than “Max units per print”; each piece downloads as its own STL. The pocket runs across the joins.</p>
-  </section>
-
-  <details>
-    <summary>Help: taking a good photo</summary>
-    <ul>
-      <li>Lay the tool on plain white paper (or a big sheet of poster board). The whole tool must be on the reference rectangle, unless you use “Extend past it”.</li>
-      <li>Shoot straight down from high up and zoom in (2–3×). Wide-angle close-ups make tall parts look bigger.</li>
-      <li>Even light, no hard shadows. Overcast window light or two lamps from opposite sides.</li>
-      <li>Thick tools: the outline is the silhouette from above. Measure the thickness with calipers and use that (plus ~1 mm) for the pocket depth.</li>
-      <li>Check the result: print a slice first (set height units to 1 and depth to 2 mm) to test the fit.</li>
-    </ul>
-  </details>
+  <!-- 3. Generate: mesh, check, preview, download -->
+  <div class="panel" id="panel-generate" hidden>
+    <section>
+      <h2>Model</h2>
+      <label class="check"><input type="checkbox" id="autoUnits" checked> Height from the deepest pocket</label>
+      <div class="field"><label>Height units (7 mm)</label><input type="number" id="units" value="3" min="1"></div>
+      <div id="genCtls"></div>
+      <div class="btns"><button class="b primary" id="generate">Generate model</button></div>
+      <div id="genInfo" class="info"></div>
+    </section>
+    <section>
+      <h2>Download</h2>
+      <div class="downloads" id="downloads"><p class="hint">Generate the model first.</p></div>
+      <p class="hint">Each piece is a standard Gridfinity bin (42 mm grid, 7 mm units). Bins wider than “Max units per print” are split at grid lines and the pocket runs across the join.</p>
+    </section>
+  </div>
 </aside>
 <div id="view">
-  <div id="tabs"><button data-view="photo" class="on">Photo</button><button data-view="trace">Trace</button><button data-view="bin">Bin</button></div>
-  <canvas id="cv"></canvas>
+  <div id="toolbar"></div>
+  <canvas id="cv" tabindex="0"></canvas>
+  <div id="busy" hidden>Working…</div>
   <div id="status">Choose a photo to start.</div>
 </div>
 </main>
 <script src="js/earcut.js"></script>
 <script src="js/vision.js"></script>
+<script src="js/grid.js"></script>
 <script src="js/gridfinity.js"></script>
+<script src="js/preview3d.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

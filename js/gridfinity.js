@@ -1,92 +1,137 @@
-/* ToolTrace bin geometry: Gridfinity base, pocket field, mesh and STL/SVG export.
-   Bin coordinates are mm, origin at the bin's top-left corner seen from above, y down.
+/* ToolTrace bin geometry: Gridfinity base, pocket fields, mesh and STL/SVG export.
+   Layout coordinates are mm from the bin's top-left corner seen from above, y down.
    Meshes are mm with z up, y flipped so the top view matches the photo. */
 var TT = window.TT = window.TT || {};
 (function () {
   'use strict';
 
   var G = TT.GF = {
-    pitch: 42, gap: 0.5, unitH: 7, radius: 3.75, baseH: 4.75, floor: 1.2, res: 0.25,
-    // Foot profile (Gridfinity spec): 0.8 chamfer, 1.8 straight, 2.15 chamfer.
+    pitch: 42, gap: 0.5, unitH: 7, radius: 3.75, baseH: 4.75, res: 0.2,
+    // Foot profile (Gridfinity spec): 0.8 chamfer, 1.8 straight, 2.15 chamfer; ends 0.25 mm
+    // inside the base slab so the bodies overlap.
     foot: [[0, 0.8 + 2.15], [0.8, 2.15], [2.6, 2.15], [4.75, 0], [5.0, 0]]
   };
 
   TT.binSize = function (n) { return n * G.pitch - G.gap; };
 
-  // Bin-space point -> paper-space point for a tool placed with rotation `rot` (deg) and
-  // offset `off` from the bin centre.
-  TT.binToPaper = function (d, x, y) {
-    var a = -d.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
-    var u = x - TT.binSize(d.nx) / 2 - d.offX, v = y - TT.binSize(d.ny) / 2 - d.offY;
-    return [d.tool.cx + c * u - s * v, d.tool.cy + s * u + c * v];
+  // ---------- Layout helpers ----------
+
+  // A library shape's loops placed in the bin (item: x, y = centre in bin mm, rot in degrees).
+  TT.placeLoops = function (shape, item) {
+    var a = item.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+    return shape.loops.map(function (l) {
+      return l.map(function (p) { return [item.x + c * p[0] - s * p[1], item.y + s * p[0] + c * p[1]]; });
+    });
   };
 
-  TT.paperToBin = function (d, x, y) {
-    var a = d.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
-    var u = x - d.tool.cx, v = y - d.tool.cy;
-    return [TT.binSize(d.nx) / 2 + d.offX + c * u - s * v, TT.binSize(d.ny) / 2 + d.offY + s * u + c * v];
-  };
-
-  // Tool outline extents after rotation, relative to the tool centroid.
-  TT.rotatedBox = function (tool, rot) {
-    var a = rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a), b = [1e9, 1e9, -1e9, -1e9];
-    tool.loops.forEach(function (loop) {
-      loop.forEach(function (p) {
-        var u = p[0] - tool.cx, v = p[1] - tool.cy, x = c * u - s * v, y = s * u + c * v;
-        if (x < b[0]) b[0] = x; if (y < b[1]) b[1] = y;
-        if (x > b[2]) b[2] = x; if (y > b[3]) b[3] = y;
+  // Bounding box of everything that gets cut, including clearance: [x0, y0, x1, y1].
+  TT.layoutBox = function (L, lib) {
+    var b = [Infinity, Infinity, -Infinity, -Infinity];
+    L.items.forEach(function (it) {
+      var sh = lib[it.shapeId];
+      if (!sh) return;
+      TT.placeLoops(sh, it)[0].forEach(function (p) {
+        b[0] = Math.min(b[0], p[0] - L.clearance); b[1] = Math.min(b[1], p[1] - L.clearance);
+        b[2] = Math.max(b[2], p[0] + L.clearance); b[3] = Math.max(b[3], p[1] + L.clearance);
       });
     });
-    return b;
+    L.notches.forEach(function (n) {
+      b[0] = Math.min(b[0], n.x - n.d / 2); b[1] = Math.min(b[1], n.y - n.d / 2);
+      b[2] = Math.max(b[2], n.x + n.d / 2); b[3] = Math.max(b[3], n.y + n.d / 2);
+    });
+    return b[0] === Infinity ? null : b;
   };
 
-  // Rotation (deg) giving the smallest bounding box, laid landscape.
-  TT.bestRotation = function (tool) {
+  // Smallest bin around the layout with `wall` to spare, and the shift that centres it.
+  TT.fitBin = function (L, lib) {
+    var b = TT.layoutBox(L, lib);
+    if (!b) return null;
+    var nx = Math.max(1, Math.ceil((b[2] - b[0] + 2 * L.wall + G.gap) / G.pitch));
+    var ny = Math.max(1, Math.ceil((b[3] - b[1] + 2 * L.wall + G.gap) / G.pitch));
+    return { nx: nx, ny: ny, dx: TT.binSize(nx) / 2 - (b[0] + b[2]) / 2, dy: TT.binSize(ny) / 2 - (b[1] + b[3]) / 2 };
+  };
+
+  // Rotation (deg) giving a shape the smallest bounding box, laid landscape.
+  TT.bestRotation = function (shape) {
     var best = 0, bestA = Infinity;
-    for (var r = 0; r < 180; r += 0.5) {
-      var b = TT.rotatedBox(tool, r), a = (b[2] - b[0]) * (b[3] - b[1]);
-      if (a < bestA - 1e-6) { bestA = a; best = r; }
+    function box(r) {
+      var a = r * Math.PI / 180, c = Math.cos(a), s = Math.sin(a), b = [1e9, 1e9, -1e9, -1e9];
+      shape.loops[0].forEach(function (p) {
+        var x = c * p[0] - s * p[1], y = s * p[0] + c * p[1];
+        b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y);
+      });
+      return b;
     }
-    var bb = TT.rotatedBox(tool, best);
+    for (var r = 0; r < 180; r += 0.5) {
+      var b = box(r), ar = (b[2] - b[0]) * (b[3] - b[1]);
+      if (ar < bestA - 1e-6) { bestA = ar; best = r; }
+    }
+    var bb = box(best);
     if (bb[3] - bb[1] > bb[2] - bb[0]) best += 90;
     return best % 180;
   };
 
-  // Units needed in x and y for the tool + clearance + wall, and the offset that centres it.
-  TT.autoFit = function (d) {
-    var b = TT.rotatedBox(d.tool, d.rot), pad = 2 * (d.clearance + d.wall) + G.gap;
-    return {
-      nx: Math.max(1, Math.ceil((b[2] - b[0] + pad) / G.pitch)),
-      ny: Math.max(1, Math.ceil((b[3] - b[1] + pad) / G.pitch)),
-      offX: -(b[0] + b[2]) / 2, offY: -(b[1] + b[3]) / 2
-    };
+  TT.maxDepth = function (L) {
+    var d = 0;
+    L.items.forEach(function (it) { d = Math.max(d, it.depth); });
+    L.notches.forEach(function (n) { d = Math.max(d, n.depth); });
+    return d;
   };
 
-  TT.autoHeight = function (depth) {
-    return Math.max(1, Math.ceil((G.baseH + G.floor + depth) / G.unitH));
+  TT.autoHeight = function (L) {
+    return Math.max(1, Math.ceil((G.baseH + L.floor + TT.maxDepth(L)) / G.unitH));
   };
 
-  // Pocket signed distance (mm, negative = cut) sampled on a grid covering the whole bin with
-  // a 1 mm border. Sample (i, j) is at bin mm (-1 + i * res, -1 + j * res).
-  TT.pocketField = function (d) {
-    var res = G.res, W = TT.binSize(d.nx), H = TT.binSize(d.ny);
+  // ---------- Pocket fields ----------
+
+  // Distinct pocket depths, deepest first.
+  function depthLevels(L) {
+    var s = {};
+    L.items.forEach(function (it) { s[it.depth] = 1; });
+    L.notches.forEach(function (n) { s[n.depth] = 1; });
+    return Object.keys(s).map(Number).filter(function (d) { return d > 0; }).sort(function (a, b) { return b - a; });
+  }
+
+  // For each depth level d (deepest first): signed distance (mm, negative = cut) of the union of
+  // every pocket at least d deep, on a grid covering the bin with a 1 mm border. Sample (i, j)
+  // is at bin mm (-1 + i * res, -1 + j * res). Pockets are rasterised with canvas (clearance =
+  // a round-joined stroke), then turned into a distance field.
+  TT.pocketFields = function (L, lib) {
+    var res = G.res, W = TT.binSize(L.nx), H = TT.binSize(L.ny);
     var w = Math.round((W + 2) / res) + 1, h = Math.round((H + 2) / res) + 1;
-    var f = new Float32Array(w * h), nr = d.notchD / 2;
-    var a = -d.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a), t = d.tool;
-    for (var j = 0; j < h; j++) {
-      var y = -1 + j * res;
-      for (var i = 0; i < w; i++) {
-        var x = -1 + i * res, u = x - W / 2 - d.offX, v = y - H / 2 - d.offY;
-        var val = TT.toolSdf(t, t.cx + c * u - s * v, t.cy + s * u + c * v) - d.clearance;
-        for (var k = 0; k < d.notches.length; k++) {
-          var nv = Math.hypot(x - d.notches[k][0], y - d.notches[k][1]) - nr;
-          if (nv < val) val = nv;
-        }
-        f[j * w + i] = val;
-      }
-    }
-    return { f: f, w: w, h: h, res: res };
+    var cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    var ctx = cv.getContext('2d');
+    return depthLevels(L).map(function (d) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      ctx.setTransform(1 / res, 0, 0, 1 / res, 1 / res + 0.5, 1 / res + 0.5);
+      ctx.fillStyle = ctx.strokeStyle = '#000';
+      ctx.lineJoin = 'round';
+      L.items.forEach(function (it) {
+        var sh = lib[it.shapeId];
+        if (!sh || it.depth < d) return;
+        ctx.beginPath();
+        TT.placeLoops(sh, it).forEach(function (l) {
+          l.forEach(function (p, k) { ctx[k ? 'lineTo' : 'moveTo'](p[0], p[1]); });
+          ctx.closePath();
+        });
+        ctx.fill('evenodd');
+        if (L.clearance > 0) { ctx.lineWidth = 2 * L.clearance; ctx.stroke(); }
+      });
+      L.notches.forEach(function (n) {
+        if (n.depth < d) return;
+        ctx.beginPath(); ctx.arc(n.x, n.y, n.d / 2, 0, 2 * Math.PI); ctx.fill();
+      });
+      var px = ctx.getImageData(0, 0, w, h).data, mask = new Uint8Array(w * h);
+      for (var i = 0; i < w * h; i++) mask[i] = px[i * 4 + 3] >= 128 ? 1 : 0;
+      var f = TT.sdf(mask, w, h);
+      for (i = 0; i < w * h; i++) f[i] *= res;
+      return { depth: d, f: f, w: w, h: h, res: res };
+    });
   };
+
+  // ---------- Pieces and meshes ----------
 
   function splitAxis(n, max) {
     var parts = Math.ceil(n / max), out = [], at = 0;
@@ -98,12 +143,10 @@ var TT = window.TT = window.TT || {};
   }
 
   // Printable pieces: [{ix, iy, kx, ky}] in grid units.
-  TT.pieces = function (d) {
+  TT.pieces = function (L) {
     var out = [];
-    splitAxis(d.ny, d.maxUnits).forEach(function (py) {
-      splitAxis(d.nx, d.maxUnits).forEach(function (px) {
-        out.push({ ix: px[0], kx: px[1], iy: py[0], ky: py[1] });
-      });
+    splitAxis(L.ny, L.maxUnits).forEach(function (py) {
+      splitAxis(L.nx, L.maxUnits).forEach(function (px) { out.push({ ix: px[0], kx: px[1], iy: py[0], ky: py[1] }); });
     });
     return out;
   };
@@ -149,6 +192,7 @@ var TT = window.TT = window.TT || {};
   }
 
   // Closed prism of polygon loops (solid on the left of every loop, y up) from z0 to z1.
+  // Returns the area (mm^2) the triangulation missed, as a sanity check.
   function prism(m, loops, z0, z1) {
     var outers = [], holes = [];
     loops.forEach(function (l) { (TT.loopArea(l) > 0 ? outers : holes).push(l); });
@@ -189,10 +233,12 @@ var TT = window.TT = window.TT || {};
     return missing;
   }
 
-  // One printable bin. Returns {shells: [Float32Array], missingArea}.
-  TT.pieceMesh = function (d, pf, pc) {
+  // One printable bin. fields = TT.pocketFields(...). Returns {shells: [Float32Array], missingArea}.
+  // Solid = feet + base slab up to the deepest pocket floor + one layer per pocket depth, each the
+  // bin outline minus every pocket at least that deep.
+  TT.pieceMesh = function (L, fields, pc) {
     var W = TT.binSize(pc.kx), H = TT.binSize(pc.ky), X0 = pc.ix * G.pitch, Y0 = pc.iy * G.pitch;
-    var top = d.units * G.unitH, floorZ = top - d.depth, shells = [];
+    var top = L.units * G.unitH, shells = [], missing = 0;
 
     for (var gy = 0; gy < pc.ky; gy++) for (var gx = 0; gx < pc.kx; gx++) {
       var m = new Mesh(), cx = gx * G.pitch + 20.75, cy = H - (gy * G.pitch + 20.75);
@@ -202,24 +248,27 @@ var TT = window.TT = window.TT || {};
       shells.push(m);
     }
 
+    var floors = fields.map(function (f) { return top - f.depth; }), firstFloor = floors.length ? floors[0] : top;
     var body = new Mesh(), outline = roundRect(W / 2, H / 2, W, H, G.radius, 8);
-    loft(body, [{ z: G.baseH, pts: outline }, { z: floorZ, pts: outline }]);
+    loft(body, [{ z: G.baseH, pts: outline }, { z: firstFloor, pts: outline }]);
     shells.push(body);
 
-    // Layer above the pocket floor: bin outline minus the pocket, on this piece's slice of the grid.
-    var i0 = Math.round(X0 / pf.res), j0 = Math.round(Y0 / pf.res);
-    var w = Math.round((W + 2) / pf.res) + 1, h = Math.round((H + 2) / pf.res) + 1, g = new Float32Array(w * h);
-    for (var j = 0; j < h; j++) for (var i = 0; i < w; i++) {
-      var x = -1 + i * pf.res, y = -1 + j * pf.res;
-      var rect = sdRoundRect(x, y, W / 2, H / 2, W / 2, H / 2, G.radius);
-      var pocket = pf.f[(j + j0) * pf.w + (i + i0)];
-      g[j * w + i] = Math.max(rect, -pocket);
-    }
-    var loops = TT.contours(g, w, h).map(function (l) {
-      return TT.simplify(l, 0.02).map(function (p) { return [-1 + p[0] * pf.res, H - (-1 + p[1] * pf.res)]; });
-    }).filter(function (l) { return l.length >= 3; });
-    var upper = new Mesh(), missing = prism(upper, loops, floorZ - 0.2, top);
-    shells.push(upper);
+    fields.forEach(function (pf, k) {
+      var z0 = floors[k], z1 = k + 1 < floors.length ? floors[k + 1] : top;
+      if (z1 - z0 < 1e-6) return;
+      var i0 = Math.round(X0 / pf.res), j0 = Math.round(Y0 / pf.res);
+      var w = Math.round((W + 2) / pf.res) + 1, h = Math.round((H + 2) / pf.res) + 1, g = new Float32Array(w * h);
+      for (var j = 0; j < h; j++) for (var i = 0; i < w; i++) {
+        var x = -1 + i * pf.res, y = -1 + j * pf.res;
+        g[j * w + i] = Math.max(sdRoundRect(x, y, W / 2, H / 2, W / 2, H / 2, G.radius), -pf.f[(j + j0) * pf.w + (i + i0)]);
+      }
+      var loops = TT.contours(g, w, h).map(function (l) {
+        return TT.simplify(l, 0.04).map(function (p) { return [-1 + p[0] * pf.res, H - (-1 + p[1] * pf.res)]; });
+      }).filter(function (l) { return l.length >= 3; });
+      var layer = new Mesh();
+      missing += prism(layer, loops, z0 - 0.2, z1);
+      shells.push(layer);
+    });
     return { shells: shells.map(function (s) { return new Float32Array(s.v); }), missingArea: missing };
   };
 
@@ -237,6 +286,15 @@ var TT = window.TT = window.TT || {};
     var open = 0;
     cnt.forEach(function (c) { open += c; });
     return open;
+  };
+
+  // Signed volume of a closed shell (positive when faces point outwards).
+  TT.volume = function (v) {
+    var V = 0;
+    for (var t = 0; t < v.length; t += 9)
+      V += (v[t] * (v[t + 4] * v[t + 8] - v[t + 5] * v[t + 7]) - v[t + 1] * (v[t + 3] * v[t + 8] - v[t + 5] * v[t + 6]) +
+            v[t + 2] * (v[t + 3] * v[t + 7] - v[t + 4] * v[t + 6])) / 6;
+    return V;
   };
 
   TT.stl = function (shells) {
@@ -259,20 +317,22 @@ var TT = window.TT = window.TT || {};
     return buf;
   };
 
-  // 1:1 SVG (mm) of the bin outline(s) and pocket outline, e.g. for a laser-cut foam insert.
-  TT.svg = function (d, pf) {
-    var W = TT.binSize(d.nx), H = TT.binSize(d.ny), parts = [];
-    TT.pieces(d).forEach(function (pc) {
-      parts.push('<rect x="' + (pc.ix * G.pitch).toFixed(3) + '" y="' + (pc.iy * G.pitch).toFixed(3) +
-        '" width="' + TT.binSize(pc.kx) + '" height="' + TT.binSize(pc.ky) + '" rx="' + G.radius + '"/>');
+  // 1:1 SVG (mm) of the bin outline(s) and the pocket outline at each depth.
+  TT.svg = function (L, fields) {
+    var W = TT.binSize(L.nx), H = TT.binSize(L.ny), parts = [], colours = ['#ff0000', '#0000ff', '#00a000', '#ff8800'];
+    TT.pieces(L).forEach(function (pc) {
+      parts.push('<rect x="' + (pc.ix * G.pitch) + '" y="' + (pc.iy * G.pitch) + '" width="' + TT.binSize(pc.kx) +
+        '" height="' + TT.binSize(pc.ky) + '" rx="' + G.radius + '" stroke="#000000"/>');
     });
-    TT.contours(pf.f, pf.w, pf.h).forEach(function (l) {
-      l = TT.simplify(l, 0.02);
-      parts.push('<path d="M' + l.map(function (p) {
-        return (-1 + p[0] * pf.res).toFixed(3) + ' ' + (-1 + p[1] * pf.res).toFixed(3);
-      }).join('L') + 'Z"/>');
+    fields.forEach(function (pf, k) {
+      TT.contours(pf.f, pf.w, pf.h).forEach(function (l) {
+        l = TT.simplify(l, 0.03);
+        parts.push('<path stroke="' + colours[k % colours.length] + '" d="M' + l.map(function (p) {
+          return (-1 + p[0] * pf.res).toFixed(3) + ' ' + (-1 + p[1] * pf.res).toFixed(3);
+        }).join('L') + 'Z"/>');
+      });
     });
     return '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + 'mm" height="' + H + 'mm" viewBox="0 0 ' + W + ' ' + H +
-      '"><g fill="none" stroke="#ff0000" stroke-width="0.1">' + parts.join('') + '</g></svg>';
+      '"><g fill="none" stroke-width="0.1">' + parts.join('') + '</g></svg>';
   };
 })();

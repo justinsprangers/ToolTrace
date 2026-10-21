@@ -1,414 +1,101 @@
-/* ToolTrace UI: photo -> corners -> trace -> bin layout -> export. */
+/* ToolTrace UI. Three phases:
+   1. Capture: photo -> scale reference -> flattened image -> traced outlines -> library
+   2. Layout: place library shapes (and finger notches) in a bin
+   3. Generate: build the mesh, check it, preview, download
+   The library and layout are kept in localStorage and can be saved as a project file. */
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
-  var cv = $('cv'), ctx = cv.getContext('2d');
+  var cv = $('cv'), ctx = cv.getContext('2d'), G = TT.GF;
+
   var S = {
-    view: 'photo', src: null, srcCanvas: null, corners: null, warp: null, warpCanvas: null,
-    maskCanvas: null, seg: null, excluded: [], tool: null, pf: null, mode: 'move', autoCenter: true, drag: null, pending: {}
+    phase: 'capture', capView: 'photo', capTool: 'pick', layTool: 'select',
+    photo: null, src: null, gray: null, corners: null, refMode: 'paper', gridFit: null,
+    warp: null, warpCanvas: null, score: null, segMask: null, mask: null, overlay: null,
+    shapes: [], strokes: [], excluded: [], stroke: null,
+    lib: {}, libOrder: [], sel: null, gen: null, preview: null,
+    views: {}, drag: null, pending: {}
   };
-  var D = { rot: 0, offX: 0, offY: 0, notches: [] };
+  var L = { nx: 2, ny: 1, clearance: 1, wall: 2, floor: 1.2, units: 3, autoUnits: true, maxUnits: 6, autoSize: true, items: [], notches: [] };
 
-  // ---------- Controls ----------
+  // ---------- Small helpers ----------
 
-  function num(id) { return parseFloat($(id).value) || 0; }
+  function later(key, fn, ms) { clearTimeout(S.pending[key]); S.pending[key] = setTimeout(fn, ms); }
 
-  document.querySelectorAll('input[type=range]').forEach(function (r) {
-    var out = r.parentNode.querySelector('output');
-    var show = function () { out.textContent = r.value; };
-    r.addEventListener('input', show); show();
-  });
+  function status(msg, warn) { $('status').textContent = msg; $('status').className = warn ? 'warn' : ''; }
 
-  function later(key, fn, ms) {
-    clearTimeout(S.pending[key]);
-    S.pending[key] = setTimeout(fn, ms);
+  // Run something slow with a "Working…" badge shown first.
+  function work(msg, fn) {
+    $('busy').textContent = msg; $('busy').hidden = false;
+    setTimeout(function () {
+      try { fn(); } catch (e) { console.error(e); status('Something went wrong: ' + e.message, true); }
+      $('busy').hidden = true;
+    }, 20);
   }
 
-  function status(msg, warn) {
-    $('status').textContent = msg;
-    $('status').className = warn ? 'warn' : '';
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  function fmt(mm) { return mm.toFixed(1) + ' mm (' + (mm / 25.4).toFixed(2) + ' in)'; }
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+  // Labelled number box + slider, kept in sync. The number box accepts values past the slider range.
+  var C = {};
+  function ctl(parent, id, label, min, max, step, value, unit, onInput) {
+    var div = document.createElement('div');
+    div.className = 'ctl';
+    div.innerHTML = '<div class="top"><label for="n_' + id + '">' + label + '</label><input type="number" id="n_' + id +
+      '" step="' + step + '"><span class="unit">' + (unit || '') + '</span></div><input type="range">';
+    var num = div.querySelector('input[type=number]'), rng = div.querySelector('input[type=range]');
+    rng.min = min; rng.max = max; rng.step = step;
+    var set = function (v) { num.value = +(+v).toFixed(4); rng.value = v; };
+    set(value);
+    rng.addEventListener('input', function () { num.value = rng.value; onInput(+rng.value); });
+    num.addEventListener('input', function () {
+      if (num.value === '' || isNaN(+num.value)) return;
+      rng.value = num.value; onInput(+num.value);
+    });
+    C[id] = { get: function () { return parseFloat(num.value) || 0; }, set: set };
+    $(parent).appendChild(div);
   }
 
-  function refSize() {
-    var v = $('ref').value;
-    $('customRef').hidden = v !== 'custom';
-    if (v === 'custom') { var u = num('refUnit'); return [num('refW') * u, num('refH') * u]; }
-    return v.split('x').map(Number);
+  function segButtons(id, onPick) {
+    $(id).querySelectorAll('button').forEach(function (b) {
+      b.onclick = function () {
+        $(id).querySelectorAll('button').forEach(function (o) { o.classList.toggle('on', o === b); });
+        onPick(b.dataset.mode);
+      };
+    });
   }
 
-  ['ref', 'refW', 'refH', 'refUnit', 'ext'].forEach(function (id) {
-    $(id).addEventListener('input', function () { refSize(); later('warp', runWarp, 250); });
-  });
-  ['threshold', 'lumWeight', 'open', 'close', 'minArea', 'margin', 'fillHoles'].forEach(function (id) {
-    $(id).addEventListener('input', function () { setView('trace'); later('seg', runSegment, 200); });
-  });
-  ['clearance', 'depth', 'wall', 'nx', 'ny', 'units', 'maxUnits', 'notchD', 'autoUnits'].forEach(function (id) {
-    $(id).addEventListener('input', function () { setView('bin'); later('bin', runBin, 80); });
-  });
-  $('rot').addEventListener('input', function () { D.rot = num('rot'); S.autoCenter = true; setView('bin'); later('bin', runBin, 80); });
-  $('autoRot').onclick = function () { if (!S.tool) return; setRot(TT.bestRotation(S.tool)); };
-  $('flip').onclick = function () { setRot((D.rot + 90) % 360); };
-  $('center').onclick = function () { S.autoCenter = true; runBin(); };
-  $('clearNotches').onclick = function () { D.notches = []; runBin(); };
-  $('modeMove').onclick = function () { setMode('move'); };
-  $('modeNotch').onclick = function () { setMode('notch'); };
-  $('autoPaper').onclick = function () { if (S.src) { autoCorners(); runWarp(); } };
-  $('resetCorners').onclick = function () { if (S.src) { defaultCorners(); setView('photo'); runWarp(); } };
-  $('exportStl').onclick = exportStl;
-  $('exportSvg').onclick = exportSvg;
-  document.querySelectorAll('#tabs button').forEach(function (b) { b.onclick = function () { setView(b.dataset.view); }; });
+  // ---------- Persistence ----------
 
-  function setRot(r) {
-    D.rot = Math.round(r * 2) / 2;
-    $('rot').value = D.rot;
-    S.autoCenter = true;
-    setView('bin');
-    runBin();
+  function save() {
+    later('save', function () {
+      try { localStorage.setItem('tooltrace.v2', JSON.stringify({ lib: S.lib, libOrder: S.libOrder, L: L })); } catch (e) { /* storage unavailable */ }
+    }, 300);
   }
 
-  function setMode(m) {
-    S.mode = m;
-    $('modeMove').classList.toggle('on', m === 'move');
-    $('modeNotch').classList.toggle('on', m === 'notch');
-    setView('bin');
+  function load(data) {
+    S.lib = data.lib || {}; S.libOrder = (data.libOrder || Object.keys(S.lib)).filter(function (id) { return S.lib[id]; });
+    if (data.L) Object.keys(data.L).forEach(function (k) { L[k] = data.L[k]; });
+    L.items = L.items.filter(function (it) { return S.lib[it.shapeId]; });
+    S.sel = null; S.gen = null;
+    syncLayoutInputs(); renderLib(); invalidate();
   }
 
-  function setView(v) {
-    S.view = v;
-    document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.view === v); });
-    draw();
-  }
-
-  // ---------- Photo ----------
-
-  $('file').addEventListener('change', function () {
+  $('saveProject').onclick = function () {
+    download('tooltrace-project.json', JSON.stringify({ app: 'ToolTrace', version: 2, lib: S.lib, libOrder: S.libOrder, L: L }), 'application/json');
+  };
+  $('openProject').onclick = function () { $('projectFile').click(); };
+  $('projectFile').onchange = function () {
     var f = this.files[0];
     if (!f) return;
-    var img = new Image();
-    img.onload = function () { loadImage(img); URL.revokeObjectURL(img.src); };
-    img.onerror = function () { status('Could not read that image.', true); };
-    img.src = URL.createObjectURL(f);
-    var base = f.name.replace(/\.[^.]+$/, '');
-    if ($('name').value === 'tool') $('name').value = base;
-  });
-
-  function loadImage(img) {
-    var k = Math.min(1, 4000 / Math.max(img.naturalWidth, img.naturalHeight));
-    var c = document.createElement('canvas');
-    c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
-    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    S.srcCanvas = c;
-    S.src = c.getContext('2d').getImageData(0, 0, c.width, c.height);
-    S.excluded = []; S.tool = null; D.notches = [];
-    autoCorners();
-    setView('photo');
-    runWarp();
-  }
-  TT.loadImage = loadImage; // used by the test page
-
-  function defaultCorners() {
-    var w = S.src.width, h = S.src.height;
-    S.corners = [[w * 0.2, h * 0.2], [w * 0.8, h * 0.2], [w * 0.8, h * 0.8], [w * 0.2, h * 0.8]];
-  }
-
-  function autoCorners() {
-    var c = TT.detectPaper(S.src);
-    if (c) S.corners = c;
-    else { defaultCorners(); status('Couldn’t find the paper. Drag the 4 handles onto its corners.', true); }
-  }
-
-  // ---------- Pipeline ----------
-
-  function runWarp() {
-    if (!S.src || !S.corners) return;
-    var ref = refSize(), ext = num('ext'), c = TT.orderCorners(S.corners), dims = TT.fitRef(c, ref[0], ref[1]);
-    var res = Math.max(0.25, Math.sqrt((dims[0] + 2 * ext) * (dims[1] + 2 * ext) / 4e6));
-    S.warp = TT.warp(S.src, c, dims[0], dims[1], ext, res);
-    S.warpCanvas = toCanvas(S.warp.data, S.warp.w, S.warp.h);
-    runSegment();
-  }
-
-  function runSegment() {
-    if (!S.warp) return;
-    var wp = S.warp, t0 = performance.now();
-    var seg = TT.segment(wp, {
-      threshold: num('threshold'), lumWeight: num('lumWeight'), open: num('open'), close: num('close'),
-      minArea: num('minArea'), margin: num('margin'), fillHoles: $('fillHoles').checked
-    });
-    S.seg = { mask: seg.mask, comp: TT.components(seg.mask, wp.w, wp.h) };
-    applySelection();
-    if (S.tool) status('Traced ' + S.seg.comp.areas.length + ' shape(s) in ' + Math.round(performance.now() - t0) + ' ms. Click a shape in the Trace view to leave it out.');
-  }
-
-  // Component label (1-based) under a paper-mm point, or 0.
-  function labelAt(x, y) {
-    var wp = S.warp, i = Math.floor((x - wp.ox) / wp.res), j = Math.floor((y - wp.oy) / wp.res);
-    if (i < 0 || j < 0 || i >= wp.w || j >= wp.h) return 0;
-    return S.seg.comp.labels[j * wp.w + i];
-  }
-
-  // Shapes the user clicked to leave out are remembered as paper points, so they stay out
-  // when the trace settings change.
-  function applySelection() {
-    var wp = S.warp, n = wp.w * wp.h, labels = S.seg.comp.labels, off = {};
-    S.excluded.forEach(function (p) { var l = labelAt(p[0], p[1]); if (l) off[l] = 1; });
-    var mask = new Uint8Array(n), over = new Uint8ClampedArray(n * 4);
-    for (var i = 0; i < n; i++) {
-      var l = labels[i];
-      if (!l) continue;
-      if (off[l]) { over[i * 4] = over[i * 4 + 1] = over[i * 4 + 2] = 60; over[i * 4 + 3] = 150; continue; }
-      mask[i] = 1; over[i * 4] = 255; over[i * 4 + 1] = 40; over[i * 4 + 3] = 110;
-    }
-    S.maskCanvas = toCanvas(over, wp.w, wp.h);
-    var hadTool = !!S.tool;
-    S.tool = TT.toolFromMask(mask, wp.w, wp.h, wp.res, wp.ox, wp.oy);
-    if (!S.tool) { S.pf = null; status('Nothing traced. Lower the sensitivity, check the corners, or click a grey shape to include it.', true); draw(); return; }
-    if (!hadTool) { D.rot = TT.bestRotation(S.tool); $('rot').value = D.rot; }
-    S.autoCenter = true;
-    runBin();
-  }
-
-  function runBin() {
-    if (!S.tool) { draw(); return; }
-    D.tool = S.tool;
-    D.clearance = num('clearance'); D.wall = num('wall'); D.notchD = num('notchD');
-    D.maxUnits = Math.max(1, Math.round(num('maxUnits')));
-    var fit = TT.autoFit(D);
-    if ($('autoUnits').checked) { $('nx').value = fit.nx; $('ny').value = fit.ny; }
-    D.nx = Math.max(1, Math.round(num('nx'))); D.ny = Math.max(1, Math.round(num('ny')));
-    if (S.autoCenter) { D.offX = fit.offX; D.offY = fit.offY; }
-    D.depth = Math.max(0.5, num('depth'));
-    if ($('autoUnits').checked) $('units').value = TT.autoHeight(D.depth);
-    D.units = Math.max(1, Math.round(num('units')));
-    S.pf = TT.pocketField(D);
-    describe();
-    draw();
-  }
-
-  function describe() {
-    var b = TT.rotatedBox(S.tool, D.rot), w = b[2] - b[0], h = b[3] - b[1], G = TT.GF;
-    var floor = D.units * G.unitH - D.depth - G.baseH, pieces = TT.pieces(D), lines = [];
-    lines.push('Tool: ' + w.toFixed(1) + ' × ' + h.toFixed(1) + ' mm (' + (w / 25.4).toFixed(2) + ' × ' + (h / 25.4).toFixed(2) + ' in)');
-    lines.push('Bin: ' + D.nx + ' × ' + D.ny + ' units, ' + D.units + ' high = ' + TT.binSize(D.nx) + ' × ' + TT.binSize(D.ny) + ' × ' + D.units * G.unitH + ' mm');
-    if (pieces.length > 1) lines.push('Prints as ' + pieces.length + ' pieces: ' + pieces.map(function (p) { return p.kx + '×' + p.ky; }).join(', '));
-    var warn = [];
-    if (floor < 0.6) warn.push('Pocket is too deep for this height: floor is ' + floor.toFixed(1) + ' mm. Add height units.');
-    var minWall = wallLeft();
-    if (minWall < D.wall - 0.05) warn.push('Pocket comes within ' + Math.max(0, minWall).toFixed(1) + ' mm of the bin edge.');
-    $('binInfo').innerHTML = esc(lines.join('\n')) + (warn.length ? '\n<span class="warn">' + esc(warn.join('\n')) + '</span>' : '');
-  }
-
-  // Thinnest wall left between the pocket and the outside of the bin (whole bin, ignoring splits).
-  function wallLeft() {
-    var pf = S.pf, W = TT.binSize(D.nx), H = TT.binSize(D.ny), min = Infinity;
-    for (var j = 0; j < pf.h; j++) for (var i = 0; i < pf.w; i++) {
-      var v = pf.f[j * pf.w + i];
-      if (v >= 0) continue;
-      var x = -1 + i * pf.res, y = -1 + j * pf.res;
-      var edge = Math.min(x, y, W - x, H - y);
-      if (edge < min) min = edge;
-    }
-    return min;
-  }
-
-  function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
-
-  function toCanvas(data, w, h) {
-    var c = document.createElement('canvas');
-    c.width = w; c.height = h;
-    c.getContext('2d').putImageData(new ImageData(data, w, h), 0, 0);
-    return c;
-  }
-
-  // ---------- Drawing ----------
-
-  var VT = { s: 1, x: 0, y: 0 }; // screen = world * s + (x, y)
-
-  function fit(w, h, pad) {
-    var cw = cv.clientWidth, ch = cv.clientHeight;
-    VT.s = Math.min((cw - 2 * pad) / w, (ch - 2 * pad) / h);
-    VT.x = (cw - w * VT.s) / 2; VT.y = (ch - h * VT.s) / 2;
-  }
-
-  function toWorld(e) {
-    var r = cv.getBoundingClientRect();
-    return [(e.clientX - r.left - VT.x) / VT.s, (e.clientY - r.top - VT.y) / VT.s];
-  }
-
-  function draw() {
-    var dpr = window.devicePixelRatio || 1, cw = cv.clientWidth, ch = cv.clientHeight;
-    if (cv.width !== Math.round(cw * dpr) || cv.height !== Math.round(ch * dpr)) { cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr); }
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = '#e9e9e6'; ctx.fillRect(0, 0, cw, ch);
-    if (S.view === 'photo') drawPhoto();
-    else if (S.view === 'trace') drawTrace();
-    else drawBin();
-  }
-
-  function world(dpr) { ctx.setTransform(dpr * VT.s, 0, 0, dpr * VT.s, dpr * VT.x, dpr * VT.y); }
-
-  function drawPhoto() {
-    if (!S.src) return;
-    var dpr = window.devicePixelRatio || 1;
-    fit(S.src.width, S.src.height, 12);
-    world(dpr);
-    ctx.drawImage(S.srcCanvas, 0, 0);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    var c = TT.orderCorners(S.corners).map(function (p) { return [p[0] * VT.s + VT.x, p[1] * VT.s + VT.y]; });
-    ctx.strokeStyle = '#e8590c'; ctx.lineWidth = 2;
-    ctx.beginPath(); c.forEach(function (p, i) { ctx[i ? 'lineTo' : 'moveTo'](p[0], p[1]); }); ctx.closePath(); ctx.stroke();
-    S.corners.forEach(function (p) {
-      ctx.beginPath(); ctx.arc(p[0] * VT.s + VT.x, p[1] * VT.s + VT.y, 9, 0, 7);
-      ctx.fillStyle = 'rgba(232,89,12,0.35)'; ctx.fill(); ctx.stroke();
-    });
-    if (S.drag && S.drag.corner !== undefined) drawLoupe(S.corners[S.drag.corner], dpr);
-  }
-
-  // Magnified view of the area around a dragged corner, in the canvas's top-left.
-  function drawLoupe(p, dpr) {
-    var size = 170, zoom = 4, r = size / zoom / 2;
-    ctx.save();
-    ctx.beginPath(); ctx.rect(10, 10, size, size); ctx.clip();
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(S.srcCanvas, p[0] - r, p[1] - r, 2 * r, 2 * r, 10, 10, size, size);
-    ctx.restore();
-    ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(10, 10, size, size);
-    ctx.strokeStyle = '#e8590c';
-    ctx.beginPath(); ctx.moveTo(10 + size / 2, 10); ctx.lineTo(10 + size / 2, 10 + size);
-    ctx.moveTo(10, 10 + size / 2); ctx.lineTo(10 + size, 10 + size / 2); ctx.stroke();
-  }
-
-  function drawTrace() {
-    if (!S.warp) return;
-    var dpr = window.devicePixelRatio || 1, wp = S.warp;
-    fit(wp.w * wp.res, wp.h * wp.res, 12);
-    world(dpr);
-    ctx.translate(-wp.ox, -wp.oy); // from here on, units are paper mm
-    ctx.save();
-    ctx.translate(wp.ox, wp.oy); ctx.scale(wp.res, wp.res);
-    ctx.drawImage(S.warpCanvas, 0, 0);
-    ctx.drawImage(S.maskCanvas, 0, 0);
-    ctx.restore();
-    if (S.tool) {
-      ctx.strokeStyle = '#ffd400'; ctx.lineWidth = 1.5 / VT.s;
-      ctx.beginPath();
-      S.tool.loops.forEach(function (l) { l.forEach(function (p, i) { ctx[i ? 'lineTo' : 'moveTo'](p[0], p[1]); }); ctx.closePath(); });
-      ctx.stroke();
-    }
-    drawRuler(dpr);
-  }
-
-  // 50 mm scale bar.
-  function drawRuler(dpr) {
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    var len = 50 * VT.s, x = 16, y = cv.clientHeight - 16;
-    ctx.fillStyle = '#222'; ctx.fillRect(x, y - 3, len, 3);
-    ctx.font = '12px system-ui'; ctx.fillText('50 mm', x, y - 7);
-  }
-
-  function drawBin() {
-    if (!S.tool || !S.pf) return;
-    var dpr = window.devicePixelRatio || 1, W = TT.binSize(D.nx), H = TT.binSize(D.ny), G = TT.GF, pf = S.pf, wp = S.warp;
-    fit(W, H, 30);
-    world(dpr);
-    var pieces = TT.pieces(D);
-    ctx.save();
-    ctx.beginPath();
-    pieces.forEach(function (pc) { roundRectPath(pc.ix * G.pitch, pc.iy * G.pitch, TT.binSize(pc.kx), TT.binSize(pc.ky), G.radius); });
-    ctx.fillStyle = '#fff'; ctx.fill();
-    ctx.clip();
-    // Photo of the tool, placed the way it sits in the bin.
-    ctx.save();
-    ctx.globalAlpha = 0.55;
-    ctx.translate(W / 2 + D.offX, H / 2 + D.offY);
-    ctx.rotate(D.rot * Math.PI / 180);
-    ctx.translate(-S.tool.cx + wp.ox, -S.tool.cy + wp.oy);
-    ctx.scale(wp.res, wp.res);
-    ctx.drawImage(S.warpCanvas, 0, 0);
-    ctx.restore();
-    // Grid cells.
-    ctx.strokeStyle = '#ccc'; ctx.lineWidth = 0.4; ctx.setLineDash([2, 2]);
-    for (var gx = 1; gx < D.nx; gx++) { ctx.beginPath(); ctx.moveTo(gx * G.pitch - 0.25, 0); ctx.lineTo(gx * G.pitch - 0.25, H); ctx.stroke(); }
-    for (var gy = 1; gy < D.ny; gy++) { ctx.beginPath(); ctx.moveTo(0, gy * G.pitch - 0.25); ctx.lineTo(W, gy * G.pitch - 0.25); ctx.stroke(); }
-    ctx.setLineDash([]);
-    // Pocket.
-    ctx.beginPath();
-    TT.contours(pf.f, pf.w, pf.h).forEach(function (l) {
-      l.forEach(function (p, i) { ctx[i ? 'lineTo' : 'moveTo'](-1 + p[0] * pf.res, -1 + p[1] * pf.res); });
-      ctx.closePath();
-    });
-    ctx.fillStyle = 'rgba(232,89,12,0.25)'; ctx.fill('evenodd');
-    ctx.strokeStyle = '#e8590c'; ctx.lineWidth = 0.5; ctx.stroke();
-    ctx.restore();
-    // Piece outlines.
-    ctx.strokeStyle = '#333'; ctx.lineWidth = 0.6;
-    ctx.beginPath();
-    pieces.forEach(function (pc) { roundRectPath(pc.ix * G.pitch, pc.iy * G.pitch, TT.binSize(pc.kx), TT.binSize(pc.ky), G.radius); });
-    ctx.stroke();
-    ctx.strokeStyle = '#1c7ed6'; ctx.lineWidth = 0.5;
-    D.notches.forEach(function (n) { ctx.beginPath(); ctx.arc(n[0], n[1], D.notchD / 2, 0, 7); ctx.stroke(); });
-    drawRuler(dpr);
-  }
-
-  function roundRectPath(x, y, w, h, r) {
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
-  }
-
-  window.addEventListener('resize', draw);
-
-  // ---------- Pointer ----------
-
-  cv.addEventListener('pointerdown', function (e) {
-    var p = toWorld(e);
-    if (S.view === 'photo' && S.corners) {
-      var best = -1, bd = 30 / VT.s;
-      S.corners.forEach(function (c, i) { var d = Math.hypot(c[0] - p[0], c[1] - p[1]); if (d < bd) { bd = d; best = i; } });
-      if (best < 0) return;
-      S.drag = { corner: best, dx: S.corners[best][0] - p[0], dy: S.corners[best][1] - p[1] };
-    } else if (S.view === 'trace' && S.seg) {
-      var x = p[0] + S.warp.ox, y = p[1] + S.warp.oy, l = labelAt(x, y);
-      if (!l) return;
-      var before = S.excluded.length;
-      S.excluded = S.excluded.filter(function (q) { return labelAt(q[0], q[1]) !== l; });
-      if (S.excluded.length === before) S.excluded.push([x, y]);
-      S.tool = null; // re-pick the rotation for the new selection
-      applySelection();
-      return;
-    } else if (S.view === 'bin' && S.tool) {
-      if (S.mode === 'notch') {
-        var hit = D.notches.findIndex(function (n) { return Math.hypot(n[0] - p[0], n[1] - p[1]) < D.notchD / 2; });
-        if (hit >= 0) D.notches.splice(hit, 1); else D.notches.push(p);
-        runBin();
-        return;
-      }
-      S.drag = { last: p };
-    } else return;
-    cv.setPointerCapture(e.pointerId);
-  });
-
-  cv.addEventListener('pointermove', function (e) {
-    if (!S.drag) return;
-    var p = toWorld(e);
-    if (S.drag.corner !== undefined) {
-      S.corners[S.drag.corner] = [p[0] + S.drag.dx, p[1] + S.drag.dy];
-      draw();
-    } else {
-      D.offX += p[0] - S.drag.last[0]; D.offY += p[1] - S.drag.last[1];
-      S.drag.last = p; S.autoCenter = false;
-      later('bin', runBin, 30);
-    }
-  });
-
-  cv.addEventListener('pointerup', function () {
-    if (!S.drag) return;
-    var wasCorner = S.drag.corner !== undefined;
-    S.drag = null;
-    if (wasCorner) runWarp(); else draw();
-  });
-
-  // ---------- Export ----------
+    f.text().then(function (t) {
+      var d = JSON.parse(t);
+      if (S.libOrder.length && !confirm('Replace the current library and layout with this project?')) return;
+      load(d); save(); status('Opened ' + f.name + '.');
+    }).catch(function () { status('That file isn’t a ToolTrace project.', true); });
+    this.value = '';
+  };
 
   function download(name, data, type) {
     var a = document.createElement('a');
@@ -418,41 +105,816 @@
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
   }
 
-  function fileBase() { return ($('name').value || 'tool').replace(/[^\w.-]+/g, '_'); }
+  // ---------- Phases and toolbar ----------
 
-  // Builds every piece and checks each shell is closed. Exposed for testing.
-  TT.buildAll = function () {
-    var pieces = TT.pieces(D), problems = [];
-    var meshes = pieces.map(function (pc, k) {
-      var m = TT.pieceMesh(D, S.pf, pc);
-      var open = 0;
-      m.shells.forEach(function (s) { open += TT.openEdges(s); });
-      if (open || m.missingArea > 1) problems.push('piece ' + (k + 1) + ': ' + open + ' open edges, ' + m.missingArea.toFixed(1) + ' mm² untriangulated');
-      return { pc: pc, shells: m.shells };
-    });
-    return { meshes: meshes, problems: problems };
+  document.querySelectorAll('.phases button').forEach(function (b) { b.onclick = function () { setPhase(b.dataset.phase); }; });
+
+  function setPhase(p) {
+    S.phase = p;
+    document.querySelectorAll('.phases button').forEach(function (b) { b.classList.toggle('on', b.dataset.phase === p); });
+    ['capture', 'layout', 'generate'].forEach(function (k) { $('panel-' + k).hidden = k !== p; });
+    if (p === 'layout') renderLib();
+    if (p === 'generate' && !S.gen) $('genInfo').textContent = L.items.length ? 'Press Generate to build the model.' : 'Place some tools in Layout first.';
+    toolbar(); draw();
+  }
+
+  function toolbar() {
+    var tb = $('toolbar'), html = '';
+    function seg(id, items, on) {
+      return '<div class="seg" id="' + id + '">' + items.map(function (it) {
+        return '<button data-mode="' + it[0] + '"' + (it[0] === on ? ' class="on"' : '') + ' title="' + (it[2] || '') + '">' + it[1] + '</button>';
+      }).join('') + '</div>';
+    }
+    if (S.phase === 'capture') {
+      html = seg('tbView', [['photo', 'Photo'], ['trace', 'Trace']], S.capView);
+      if (S.capView === 'trace') html += '<div class="sep"></div>' + seg('tbTool', [['pick', 'Pick', 'Click a shape to leave it out / bring it back'], ['erase', 'Erase', 'Paint to remove'], ['add', 'Add', 'Paint to add']], S.capTool);
+    } else if (S.phase === 'layout') {
+      html = seg('tbTool', [['select', 'Select'], ['notch', 'Notch']], S.layTool);
+    }
+    html += '<div class="sep"></div><button class="b" id="tbFit">Fit view</button>';
+    tb.innerHTML = html;
+    if ($('tbView')) segButtons('tbView', function (m) { S.capView = m; toolbar(); draw(); });
+    if ($('tbTool')) segButtons('tbTool', function (m) { if (S.phase === 'capture') S.capTool = m; else S.layTool = m; draw(); });
+    $('tbFit').onclick = function () {
+      var v = S.views[viewKey()];
+      if (v) v.fit = true;
+      if (S.preview) { S.preview.zoom = 1; }
+      draw();
+    };
+  }
+
+  // ---------- 1. Capture ----------
+
+  ctl('extendCtl', 'ext', 'Extend past reference', 0, 300, 5, 0, 'mm', function () { later('warp', function () { runFrom('warp'); }, 250); });
+  ctl('traceCtls', 'threshold', 'Sensitivity', 0.05, 1.5, 0.01, 0.35, '', function () { traceInput('score'); });
+  ctl('traceCtls', 'lumWeight', 'Brightness weight', 0, 3, 0.05, 1, '', function () { traceInput('score'); });
+  // Only needed for mat grid lines; it also blunts sharp tips, so it's off for paper.
+  ctl('traceCtls', 'open', 'Remove thin lines', 0, 3, 0.25, 0, 'mm', function () { traceInput('seg'); });
+  ctl('traceCtls', 'close', 'Bridge gaps', 0, 6, 0.25, 1, 'mm', function () { traceInput('seg'); });
+  ctl('traceCtls', 'minArea', 'Ignore shapes under', 0, 5000, 50, 300, 'mm²', function () { traceInput('seg'); });
+  ctl('traceCtls', 'margin', 'Ignore edge', 0, 30, 1, 3, 'mm', function () { traceInput('seg'); });
+  ctl('brushCtl', 'brush', 'Brush size', 1, 40, 1, 6, 'mm', function () {});
+  // Smoothing rounds off sharp tips (pockets get slightly smaller there), so keep it modest.
+  ctl('outlineCtls', 'smooth', 'Smooth outline', 0, 5, 0.1, 0.4, 'mm', function () { traceInput('extract'); });
+  ctl('outlineCtls', 'straighten', 'Straighten', 0.02, 3, 0.02, 0.3, 'mm', function () { traceInput('extract'); });
+  ctl('depthCtl', 'depth', 'Pocket depth', 1, 60, 0.5, 15, 'mm', function () {});
+  $('fillHoles').onchange = function () { traceInput('seg'); };
+
+  function traceInput(stage) {
+    if (S.phase === 'capture' && S.capView !== 'trace') { S.capView = 'trace'; toolbar(); }
+    later('trace', function () { runFrom(stage); }, stage === 'extract' ? 60 : 250);
+  }
+
+  segButtons('refMode', function (m) {
+    S.refMode = m;
+    document.querySelectorAll('[data-ref]').forEach(function (d) { d.hidden = d.dataset.ref !== m; });
+    S.capView = 'photo'; toolbar();
+    C.open.set(m === 'grid' ? 0.75 : 0);
+    if (m === 'grid') fitGrid(); else S.gridFit = null;
+    runFrom('warp');
+  });
+  ['paperSize', 'ptsW', 'ptsH', 'ptsUnit'].forEach(function (id) { $(id).addEventListener('input', function () { later('warp', function () { runFrom('warp'); }, 250); }); });
+  ['gridSize', 'gridUnit', 'gridNx', 'gridNy'].forEach(function (id) {
+    $(id).addEventListener('input', function () { later('warp', function () { fitGrid(); runFrom('warp'); }, 300); });
+  });
+  $('findPaper').onclick = function () {
+    if (!S.src) return;
+    var c = TT.detectPaper(S.src);
+    if (c) { S.corners = c; runFrom('warp'); } else status('Couldn’t find the paper. Drag the handles onto its corners.', true);
   };
+  $('detectGrid').onclick = function () {
+    if (!S.src) return;
+    work('Finding grid…', function () {
+      if (!S.gray) S.gray = TT.gridGray(S.src);
+      var g = TT.detectGrid(S.src, S.gray);
+      if (!g) { status('Couldn’t find the grid. Put the handles on 4 crossings and type the square counts.', true); return; }
+      var gc = TT.gridCorners(g);
+      S.corners = gc.corners;
+      $('gridNx').value = gc.nx; $('gridNy').value = gc.ny;
+      fitGrid(); runFrom('warp', true);
+    });
+  };
+  $('clearEdits').onclick = function () { S.strokes = []; S.excluded = []; runFrom('edit'); };
+  $('addShapes').onclick = addShapes;
 
-  function exportStl() {
-    if (!S.pf) { status('Trace a tool first.', true); return; }
-    status('Building mesh…');
-    setTimeout(function () {
-      var out = TT.buildAll(), many = out.meshes.length > 1;
-      out.meshes.forEach(function (m, k) {
-        var name = fileBase() + '_' + m.pc.kx + 'x' + m.pc.ky + 'x' + D.units + (many ? '_part' + (k + 1) : '') + '.stl';
-        setTimeout(function () { download(name, TT.stl(m.shells), 'model/stl'); }, k * 400);
+  $('file').addEventListener('change', function () {
+    var f = this.files[0];
+    if (!f) return;
+    var img = new Image();
+    img.onload = function () { loadImage(img, f.name); URL.revokeObjectURL(img.src); };
+    img.onerror = function () { status('Could not read that image.', true); };
+    img.src = URL.createObjectURL(f);
+  });
+
+  function loadImage(img, name) {
+    var w = img.naturalWidth || img.width, h = img.naturalHeight || img.height, k = Math.min(1, 4000 / Math.max(w, h));
+    var c = document.createElement('canvas');
+    c.width = Math.round(w * k); c.height = Math.round(h * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    S.photo = c; S.src = c.getContext('2d').getImageData(0, 0, c.width, c.height); S.gray = null;
+    S.strokes = []; S.excluded = []; S.warp = null; S.shapes = [];
+    if (name) $('shapeName').value = name.replace(/\.[^.]+$/, '');
+    S.views['capture-photo'] = { fit: true }; S.views['capture-trace'] = { fit: true };
+    var c4 = S.refMode === 'paper' ? TT.detectPaper(S.src) : null;
+    S.corners = c4 || [[c.width * 0.25, c.height * 0.25], [c.width * 0.75, c.height * 0.25], [c.width * 0.75, c.height * 0.75], [c.width * 0.25, c.height * 0.75]];
+    S.capView = 'photo'; setPhase('capture');
+    if (S.refMode === 'grid') { $('detectGrid').click(); return; }
+    if (S.refMode === 'paper' && !c4) status('Couldn’t find the paper. Drag the handles onto its corners.', true);
+    runFrom('warp', !!c4);
+  }
+  TT.loadImage = loadImage; // for testing
+
+  // Fit the grid from the handles + square counts and snap the handles onto the crossings.
+  function fitGrid() {
+    S.gridFit = null;
+    if (!S.src || S.refMode !== 'grid') return;
+    if (!S.gray) S.gray = TT.gridGray(S.src);
+    var nx = Math.max(1, Math.round(+$('gridNx').value)), ny = Math.max(1, Math.round(+$('gridNy').value));
+    var size = (+$('gridSize').value) * (+$('gridUnit').value);
+    var g = TT.refineGrid(S.gray, S.corners, nx, ny);
+    if (!g || !(size > 0)) { $('refInfo').innerHTML = '<span class="warn">Couldn’t match the grid. Check the handles sit on crossings and the square counts.</span>'; return; }
+    var fit = TT.gridHomography(g, size);
+    S.gridFit = { H: fit.H, nx: nx, ny: ny, size: size };
+    S.corners = [[0, 0], [nx, 0], [nx, ny], [0, ny]].map(function (q) { return TT.applyH(fit.H, q[0] * size, q[1] * size); });
+    var used = fit.used, total = (nx + 1) * (ny + 1);
+    $('refInfo').innerHTML = esc('Grid: ' + nx + ' × ' + ny + ' squares = ' + fmt(nx * size) + ' × ' + fmt(ny * size) + '\nMatched ' + used + ' of ' + total + ' crossings, fit error ' + fit.rms.toFixed(2) + ' mm') +
+      (fit.rms > 1.5 || used < 0.3 * total ? '\n<span class="warn">Poor match: check the counts and square size.</span>' : '');
+  }
+
+  // Paper mm -> image px mapping and the area to flatten.
+  function reference() {
+    if (!S.src || !S.corners) return null;
+    var ext = C.ext.get();
+    if (S.refMode === 'grid') {
+      var g = S.gridFit;
+      if (!g) return null;
+      return { H: g.H, x0: -ext, y0: -ext, w: g.nx * g.size + 2 * ext, h: g.ny * g.size + 2 * ext };
+    }
+    var a, b;
+    if (S.refMode === 'paper') { var ps = $('paperSize').value.split('x').map(Number); a = ps[0]; b = ps[1]; }
+    else { var u = +$('ptsUnit').value; a = (+$('ptsW').value) * u; b = (+$('ptsH').value) * u; }
+    if (!(a > 0 && b > 0)) return null;
+    var c = TT.orderCorners(S.corners), dims = TT.fitRef(c, a, b);
+    if (S.refMode !== 'grid') $('refInfo').textContent = 'Reference: ' + fmt(dims[0]) + ' × ' + fmt(dims[1]);
+    return { H: TT.homography([[0, 0], [dims[0], 0], [dims[0], dims[1]], [0, dims[1]]], c), x0: -ext, y0: -ext, w: dims[0] + 2 * ext, h: dims[1] + 2 * ext };
+  }
+
+  var STAGES = ['warp', 'score', 'seg', 'edit', 'extract'];
+
+  // Re-run the capture pipeline from a stage onwards (later stages reuse cached results).
+  function runFrom(stage, showTrace) {
+    if (!S.src) return;
+    var from = STAGES.indexOf(stage);
+    work('Tracing…', function () {
+      var t0 = performance.now();
+      if (from <= 0 || !S.warp) {
+        var ref = reference();
+        if (!ref) { S.warp = null; S.shapes = []; draw(); return; }
+        var res = Math.max(0.25, Math.sqrt(ref.w * ref.h / 1.5e6));
+        S.warp = TT.warp(S.src, ref.H, ref.x0, ref.y0, ref.w, ref.h, res);
+        S.warpCanvas = toCanvas(S.warp.data, S.warp.w, S.warp.h);
+        S.views['capture-trace'] = { fit: true };
+        from = 1;
+      }
+      var wp = S.warp;
+      if (from <= 1 || !S.score) S.score = TT.scoreImage(wp, C.threshold.get(), C.lumWeight.get());
+      if (from <= 2 || !S.segMask) {
+        S.segMask = TT.segment(wp, S.score, {
+          threshold: C.threshold.get(), margin: C.margin.get(), open: C.open.get(), close: C.close.get(),
+          minArea: C.minArea.get(), fillHoles: $('fillHoles').checked
+        });
+      }
+      if (from <= 3 || !S.mask) applyEdits();
+      var minArea = Math.max(20, C.minArea.get());
+      S.shapes = TT.extractShapes(S.mask, wp, C.smooth.get(), C.straighten.get()).filter(function (sh) { return sh.area >= minArea; });
+      describeShapes(performance.now() - t0);
+      if (showTrace) { S.capView = 'trace'; toolbar(); }
+      draw();
+    });
+  }
+
+  // Brush strokes, then shapes the user picked out (remembered as paper points).
+  function applyEdits() {
+    var wp = S.warp, n = wp.w * wp.h, mask = S.segMask.slice();
+    S.strokes.forEach(function (st) { TT.paint(mask, wp, st.pts, st.r, st.mode === 'add' ? 1 : 0); });
+    var comp = TT.components(mask, wp.w, wp.h), off = {};
+    S.excluded.forEach(function (p) { var l = labelAt(comp.labels, p[0], p[1]); if (l) off[l] = 1; });
+    var over = new Uint8ClampedArray(n * 4);
+    for (var i = 0; i < n; i++) {
+      var l = comp.labels[i];
+      if (!l) continue;
+      if (off[l]) { mask[i] = 0; over[i * 4] = over[i * 4 + 1] = over[i * 4 + 2] = 70; over[i * 4 + 3] = 150; }
+      else { over[i * 4] = 255; over[i * 4 + 1] = 50; over[i * 4 + 3] = 90; }
+    }
+    S.mask = mask; S.labels = comp.labels;
+    S.overlay = toCanvas(over, wp.w, wp.h);
+  }
+
+  function labelAt(labels, x, y) {
+    var wp = S.warp, i = Math.floor((x - wp.ox) / wp.res), j = Math.floor((y - wp.oy) / wp.res);
+    if (i < 0 || j < 0 || i >= wp.w || j >= wp.h) return 0;
+    return labels[j * wp.w + i];
+  }
+
+  function shapeBox(sh) {
+    var b = [Infinity, Infinity, -Infinity, -Infinity];
+    sh.loops[0].forEach(function (p) { b[0] = Math.min(b[0], p[0]); b[1] = Math.min(b[1], p[1]); b[2] = Math.max(b[2], p[0]); b[3] = Math.max(b[3], p[1]); });
+    return b;
+  }
+
+  function describeShapes(ms) {
+    var n = S.shapes.length;
+    $('captureInfo').textContent = n ? n + ' shape' + (n > 1 ? 's' : '') + ' traced. Sizes are shown on the Trace view.' : '';
+    if (!n) status('Nothing traced yet. Check the reference handles, or lower the Sensitivity.', true);
+    else status('Traced ' + n + ' shape' + (n > 1 ? 's' : '') + ' in ' + Math.round(ms) + ' ms. Fix them up if needed, then “Add to library”.');
+  }
+
+  function addShapes() {
+    if (!S.shapes.length) { status('Nothing to add yet.', true); return; }
+    var base = $('shapeName').value.trim() || 'tool', depth = C.depth.get();
+    S.shapes.forEach(function (sh, k) {
+      var id = 's' + uid();
+      var loops = sh.loops.map(function (l) { return l.map(function (p) { return [+(p[0] - sh.cx).toFixed(3), +(p[1] - sh.cy).toFixed(3)]; }); });
+      var b = shapeBox({ loops: loops });
+      S.lib[id] = { id: id, name: base + (S.shapes.length > 1 ? ' ' + (k + 1) : ''), loops: loops, depth: depth, w: b[2] - b[0], h: b[3] - b[1] };
+      S.libOrder.push(id);
+    });
+    save(); renderLib();
+    $('captureInfo').innerHTML = esc('Added ' + S.shapes.length + ' shape' + (S.shapes.length > 1 ? 's' : '') + ' to the library.') + ' <a href="#" id="goLayout">Go to Layout →</a>';
+    $('goLayout').onclick = function (e) { e.preventDefault(); setPhase('layout'); };
+  }
+
+  function toCanvas(data, w, h) {
+    var c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').putImageData(new ImageData(data, w, h), 0, 0);
+    return c;
+  }
+
+  // ---------- 2. Layout ----------
+
+  ctl('binCtls', 'clearance', 'Clearance around tools', 0, 4, 0.1, L.clearance, 'mm', function (v) { L.clearance = v; layoutChanged(true); });
+  ctl('binCtls', 'wall', 'Min wall', 0, 10, 0.5, L.wall, 'mm', function (v) { L.wall = v; layoutChanged(true); });
+  ctl('selCtls', 'selDepth', 'Pocket depth', 0.5, 80, 0.5, 15, 'mm', function (v) { var it = selItem(); if (it) { it.depth = v; layoutChanged(); } });
+  ctl('selCtls', 'selRot', 'Rotation', -180, 180, 0.5, 0, '°', function (v) { var it = selItem(); if (it) { it.rot = v; layoutChanged(); } });
+  ctl('notchCtls', 'notchD', 'Diameter', 8, 50, 1, 22, 'mm', function () {});
+  ctl('notchCtls', 'notchDepth', 'Depth', 1, 80, 0.5, 15, 'mm', function () {});
+
+  $('autoSize').onchange = function () { L.autoSize = this.checked; layoutChanged(true); };
+  ['nx', 'ny'].forEach(function (id) {
+    $(id).addEventListener('input', function () {
+      L[id] = Math.max(1, Math.round(+$(id).value) || 1);
+      L.autoSize = false; $('autoSize').checked = false;
+      layoutChanged();
+    });
+  });
+  $('centerAll').onclick = function () { center(); layoutChanged(); };
+  $('clearBin').onclick = function () { if (confirm('Remove every tool and notch from the bin?')) { L.items = []; L.notches = []; S.sel = null; layoutChanged(true); } };
+  $('rotL').onclick = function () { rotateSel(-90); };
+  $('rotR').onclick = function () { rotateSel(90); };
+  $('rotAuto').onclick = function () { var it = selItem(); if (it) { it.rot = TT.bestRotation(S.lib[it.shapeId]); layoutChanged(true); } };
+  $('flip').onclick = function () { var it = selItem(); if (it) { it.flip = !it.flip; layoutChanged(true); } };
+  $('dup').onclick = function () {
+    var it = selItem();
+    if (!it) return;
+    var c = JSON.parse(JSON.stringify(it));
+    c.uid = uid(); c.x += 10; c.y += 10;
+    L.items.push(c); S.sel = c.uid; layoutChanged(true);
+  };
+  $('del').onclick = deleteSel;
+
+  function syncLayoutInputs() {
+    $('nx').value = L.nx; $('ny').value = L.ny; $('autoSize').checked = L.autoSize;
+    C.clearance.set(L.clearance); C.wall.set(L.wall);
+    if (C.floor) { C.floor.set(L.floor); C.maxUnits.set(L.maxUnits); }
+    $('autoUnits').checked = L.autoUnits; $('units').value = L.units;
+  }
+
+  function selItem() { return L.items.find(function (it) { return it.uid === S.sel; }) || null; }
+
+  function placed(it) {
+    var sh = S.lib[it.shapeId];
+    if (!sh) return [];
+    var loops = it.flip ? sh.loops.map(function (l) { return l.map(function (p) { return [-p[0], p[1]]; }); }) : sh.loops;
+    return TT.placeLoops({ loops: loops }, it);
+  }
+
+  // Everything below works on items through `placed`, so flipping is handled in one place.
+  function libForGeometry() {
+    var lib = {};
+    L.items.forEach(function (it) { lib[it.uid] = { loops: placed(Object.assign({}, it, { x: 0, y: 0, rot: 0 })) }; });
+    return lib;
+  }
+  function layoutForGeometry() {
+    var c = Object.assign({}, L);
+    c.items = L.items.map(function (it) { return Object.assign({}, it, { shapeId: it.uid, rot: it.rot, flip: false }); });
+    return c;
+  }
+
+  function rotateSel(d) { var it = selItem(); if (it) { it.rot = ((it.rot + d + 540) % 360) - 180; layoutChanged(true); } }
+
+  function deleteSel() {
+    if (!S.sel) return;
+    L.items = L.items.filter(function (it) { return it.uid !== S.sel; });
+    S.sel = null; layoutChanged(true);
+  }
+
+  // Shift every tool and notch so the layout sits in the middle of the bin.
+  function center() {
+    var b = TT.layoutBox(layoutForGeometry(), libForGeometry());
+    if (!b) return;
+    var dx = TT.binSize(L.nx) / 2 - (b[0] + b[2]) / 2, dy = TT.binSize(L.ny) / 2 - (b[1] + b[3]) / 2;
+    L.items.forEach(function (it) { it.x += dx; it.y += dy; });
+    L.notches.forEach(function (n) { n.x += dx; n.y += dy; });
+  }
+
+  // After an edit: refit the bin (if automatic), invalidate the model, save, redraw.
+  function layoutChanged(refit) {
+    if (refit !== false && L.autoSize && (L.items.length || L.notches.length)) {
+      var f = TT.fitBin(layoutForGeometry(), libForGeometry());
+      if (f) { L.nx = f.nx; L.ny = f.ny; center(); }
+      $('nx').value = L.nx; $('ny').value = L.ny;
+    }
+    invalidate(); save(); syncSel(); describeLayout(); draw();
+  }
+
+  function invalidate() {
+    S.gen = null; S.preview = null;
+    $('downloads').innerHTML = '<p class="hint">Generate the model first.</p>';
+    $('genInfo').textContent = L.items.length ? 'Layout changed. Press Generate to rebuild.' : '';
+  }
+
+  function syncSel() {
+    var it = selItem();
+    $('selSection').hidden = !it;
+    if (!it) return;
+    $('selName').textContent = S.lib[it.shapeId].name;
+    C.selDepth.set(it.depth); C.selRot.set(+it.rot.toFixed(1));
+  }
+
+  // Warnings about tools too close to the bin edge.
+  function describeLayout() {
+    var lines = [], W = TT.binSize(L.nx), H = TT.binSize(L.ny), tight = [];
+    lines.push('Bin: ' + L.nx + ' × ' + L.ny + ' units = ' + W + ' × ' + H + ' mm');
+    var pcs = TT.pieces(L);
+    if (pcs.length > 1) lines.push('Prints as ' + pcs.length + ' pieces (max ' + L.maxUnits + ' units each)');
+    L.items.forEach(function (it) {
+      var d = Infinity;
+      placed(it)[0].forEach(function (p) { d = Math.min(d, p[0], p[1], W - p[0], H - p[1]); });
+      if (d - L.clearance < L.wall - 0.05) tight.push(S.lib[it.shapeId].name);
+    });
+    $('layoutInfo').innerHTML = esc(lines.join('\n')) + (tight.length ? '\n<span class="warn">Too close to the edge: ' + esc(tight.join(', ')) + '</span>' : '');
+  }
+
+  function renderLib() {
+    var box = $('lib');
+    box.innerHTML = '';
+    $('libEmpty').hidden = S.libOrder.length > 0;
+    S.libOrder.forEach(function (id) {
+      var sh = S.lib[id], row = document.createElement('div');
+      row.className = 'libitem';
+      row.innerHTML = '<canvas width="128" height="88"></canvas><div class="meta"><input type="text"><small>' +
+        sh.w.toFixed(0) + ' × ' + sh.h.toFixed(0) + ' mm</small></div><button title="Add to bin">Add</button><button title="Delete from library">✕</button>';
+      var c = row.querySelector('canvas'), g = c.getContext('2d'), b = shapeBox(sh), k = Math.min(116 / (b[2] - b[0]), 76 / (b[3] - b[1]));
+      g.setTransform(k, 0, 0, k, 64 - k * (b[0] + b[2]) / 2, 44 - k * (b[1] + b[3]) / 2);
+      g.beginPath();
+      sh.loops.forEach(function (l) { l.forEach(function (p, i) { g[i ? 'lineTo' : 'moveTo'](p[0], p[1]); }); g.closePath(); });
+      g.fillStyle = '#e8590c'; g.fill('evenodd');
+      var name = row.querySelector('input');
+      name.value = sh.name;
+      name.onchange = function () { sh.name = name.value; save(); syncSel(); };
+      var bt = row.querySelectorAll('button');
+      bt[0].onclick = function () { addItem(id); };
+      bt[1].onclick = function () {
+        var used = L.items.some(function (it) { return it.shapeId === id; });
+        if (!confirm('Delete “' + sh.name + '” from the library' + (used ? ' and the bin' : '') + '?')) return;
+        delete S.lib[id];
+        S.libOrder = S.libOrder.filter(function (x) { return x !== id; });
+        L.items = L.items.filter(function (it) { return it.shapeId !== id; });
+        if (!selItem()) S.sel = null;
+        renderLib(); layoutChanged(true);
+      };
+      box.appendChild(row);
+    });
+  }
+
+  // New item is laid landscape and goes below what's already in the bin.
+  function addItem(id) {
+    var sh = S.lib[id], it = { uid: uid(), shapeId: id, x: 0, y: 0, rot: TT.bestRotation(sh), flip: false, depth: sh.depth };
+    var b0 = TT.layoutBox({ items: [it], notches: [], clearance: 0 }, S.lib);
+    var b = L.items.length ? TT.layoutBox(layoutForGeometry(), libForGeometry()) : null;
+    if (b) { it.x = b[0] + L.clearance - b0[0]; it.y = b[3] + 4 + L.clearance - b0[1]; }
+    else { it.x = L.wall + L.clearance - b0[0] + 1; it.y = L.wall + L.clearance - b0[1] + 1; }
+    L.items.push(it); S.sel = it.uid;
+    if (!L.autoSize) center();
+    S.views.layout = { fit: true };
+    layoutChanged(true);
+    if (S.phase !== 'layout') setPhase('layout');
+    status('Added “' + sh.name + '”. Drag to move it, drag the round handle to rotate.');
+  }
+
+  // ---------- 3. Generate ----------
+
+  ctl('genCtls', 'floor', 'Min floor under pockets', 0.6, 5, 0.1, L.floor, 'mm', function (v) { L.floor = v; invalidate(); save(); });
+  ctl('genCtls', 'maxUnits', 'Max units per print', 1, 12, 1, L.maxUnits, '', function (v) { L.maxUnits = Math.max(1, Math.round(v)); invalidate(); save(); describeLayout(); });
+  $('autoUnits').onchange = function () { L.autoUnits = this.checked; invalidate(); save(); };
+  $('units').oninput = function () { L.units = Math.max(1, Math.round(+this.value) || 1); L.autoUnits = false; $('autoUnits').checked = false; invalidate(); save(); };
+  $('generate').onclick = generate;
+
+  function generate() {
+    if (!L.items.length && !L.notches.length) { $('genInfo').textContent = 'Place some tools in Layout first.'; return; }
+    work('Building model…', function () {
+      var t0 = performance.now();
+      if (L.autoUnits) { L.units = TT.autoHeight(L); $('units').value = L.units; }
+      var top = L.units * G.unitH, floor = top - TT.maxDepth(L) - G.baseH;
+      var GL = layoutForGeometry(), lib = libForGeometry();
+      var fields = TT.pocketFields(GL, lib), pieces = TT.pieces(L), problems = [], tris = 0;
+      var meshes = pieces.map(function (pc, k) {
+        var m = TT.pieceMesh(GL, fields, pc), open = 0, inverted = 0;
+        m.shells.forEach(function (s) { open += TT.openEdges(s); if (TT.volume(s) <= 0) inverted++; tris += s.length / 9; });
+        if (open || inverted || m.missingArea > 1)
+          problems.push('piece ' + (k + 1) + ': ' + open + ' open edges, ' + inverted + ' inside-out bodies, ' + m.missingArea.toFixed(1) + ' mm² missing');
+        return { pc: pc, shells: m.shells, ox: pc.ix * (G.pitch + 8), oy: (L.ny - pc.iy - pc.ky) * (G.pitch + 8) };
       });
-      if (out.problems.length) status('Exported, but the mesh check found problems (' + out.problems.join('; ') + '). Check it in your slicer.', true);
-      else status('Exported ' + out.meshes.length + ' STL file(s). Mesh check passed.');
-    }, 20);
+      // Thinnest wall between any pocket and the outside of the bin.
+      var all = fields[fields.length - 1], W = TT.binSize(L.nx), H = TT.binSize(L.ny), minWall = Infinity;
+      if (all) for (var j = 0; j < all.h; j++) for (var i = 0; i < all.w; i++) {
+        if (all.f[j * all.w + i] >= 0) continue;
+        var x = -1 + i * all.res, y = -1 + j * all.res;
+        minWall = Math.min(minWall, x, y, W - x, H - y);
+      }
+      S.gen = { meshes: meshes, fields: fields, GL: GL };
+      S.preview = new TT.Preview3D(meshes);
+      var lines = [L.nx + ' × ' + L.ny + ' units, ' + L.units + ' high (' + W + ' × ' + H + ' × ' + top + ' mm)',
+        pieces.length + ' piece' + (pieces.length > 1 ? 's' : '') + ', ' + Math.round(tris).toLocaleString() + ' triangles, built in ' + Math.round(performance.now() - t0) + ' ms'];
+      var warn = [];
+      if (floor < L.floor - 0.01) warn.push('Floor under the deepest pocket is only ' + floor.toFixed(1) + ' mm. Add height units.');
+      if (minWall < L.wall - 0.05) warn.push('A pocket comes within ' + Math.max(0, minWall).toFixed(1) + ' mm of the bin edge.');
+      if (problems.length) warn.push('Mesh check failed: ' + problems.join('; '));
+      $('genInfo').innerHTML = esc(lines.join('\n')) + '\n' + (problems.length ? '' : '<span class="ok">Mesh check passed (every body closed).</span>') +
+        (warn.length ? '\n<span class="warn">' + esc(warn.join('\n')) + '</span>' : '');
+      renderDownloads();
+      S.views.generate = { fit: true };
+      draw();
+      status('Model ready. Drag to turn it, scroll to zoom.');
+    });
   }
 
-  function exportSvg() {
-    if (!S.pf) { status('Trace a tool first.', true); return; }
-    download(fileBase() + '_outline.svg', TT.svg(D, S.pf), 'image/svg+xml');
+  function renderDownloads() {
+    var box = $('downloads'), base = (S.libOrder.length && L.items.length ? S.lib[L.items[0].shapeId].name : 'bin').replace(/[^\w.-]+/g, '_');
+    box.innerHTML = '';
+    var many = S.gen.meshes.length > 1;
+    function button(label, fn, primary) {
+      var b = document.createElement('button');
+      b.className = 'b' + (primary ? ' primary' : ''); b.textContent = label; b.onclick = fn;
+      box.appendChild(b);
+    }
+    function name(m, k) { return base + '_' + m.pc.kx + 'x' + m.pc.ky + 'x' + L.units + (many ? '_part' + (k + 1) : '') + '.stl'; }
+    if (many) button('Download all ' + S.gen.meshes.length + ' STLs', function () {
+      S.gen.meshes.forEach(function (m, k) { setTimeout(function () { download(name(m, k), TT.stl(m.shells), 'model/stl'); }, k * 400); });
+    }, true);
+    S.gen.meshes.forEach(function (m, k) {
+      button((many ? 'Piece ' + (k + 1) + ': ' : '') + m.pc.kx + ' × ' + m.pc.ky + ' units (STL)', function () { download(name(m, k), TT.stl(m.shells), 'model/stl'); }, !many);
+    });
+    button('Pocket outline (SVG, 1:1)', function () { download(base + '_outline.svg', TT.svg(L, S.gen.fields), 'image/svg+xml'); });
   }
 
-  TT.state = S; TT.design = D; // for testing from the console
-  TT.app = { runWarp: runWarp, runSegment: runSegment, applySelection: applySelection, setView: setView };
-  draw();
+  // ---------- Views: zoom / pan ----------
+
+  function viewKey() { return S.phase === 'capture' ? 'capture-' + S.capView : S.phase; }
+
+  // World extents of the current 2D view.
+  function extents() {
+    if (S.phase === 'capture' && S.capView === 'photo') return S.src ? [0, 0, S.src.width, S.src.height] : null;
+    if (S.phase === 'capture') return S.warp ? [S.warp.ox, S.warp.oy, S.warp.ox + S.warp.w * S.warp.res, S.warp.oy + S.warp.h * S.warp.res] : null;
+    if (S.phase === 'layout') return [-5, -5, TT.binSize(L.nx) + 5, TT.binSize(L.ny) + 5];
+    return null;
+  }
+
+  function vt() {
+    var k = viewKey(), v = S.views[k] || (S.views[k] = { fit: true }), e = extents();
+    if (v.fit && e) {
+      var cw = cv.clientWidth, ch = cv.clientHeight, pad = 16;
+      v.s = Math.min((cw - 2 * pad) / (e[2] - e[0]), (ch - 2 * pad) / (e[3] - e[1]));
+      v.x = (cw - (e[2] - e[0]) * v.s) / 2 - e[0] * v.s; v.y = (ch - (e[3] - e[1]) * v.s) / 2 - e[1] * v.s;
+    }
+    return v;
+  }
+
+  function toWorld(e) {
+    var r = cv.getBoundingClientRect(), v = vt();
+    return [(e.clientX - r.left - v.x) / v.s, (e.clientY - r.top - v.y) / v.s];
+  }
+
+  cv.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    if (S.phase === 'generate') { if (S.preview) { S.preview.zoom *= Math.exp(-e.deltaY * 0.0015); draw(); } return; }
+    var v = vt(), r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, k = Math.exp(-e.deltaY * 0.0015);
+    v.fit = false;
+    v.x = mx - (mx - v.x) * k; v.y = my - (my - v.y) * k; v.s *= k;
+    draw();
+  }, { passive: false });
+  cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  // ---------- Drawing ----------
+
+  function draw() {
+    var dpr = window.devicePixelRatio || 1, cw = cv.clientWidth, ch = cv.clientHeight;
+    if (cv.width !== Math.round(cw * dpr) || cv.height !== Math.round(ch * dpr)) { cv.width = Math.round(cw * dpr); cv.height = Math.round(ch * dpr); }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#e7e7e3'; ctx.fillRect(0, 0, cw, ch);
+    if (S.phase === 'capture' && S.capView === 'photo') drawPhoto(dpr);
+    else if (S.phase === 'capture') drawTrace(dpr);
+    else if (S.phase === 'layout') drawLayout(dpr);
+    else drawModel(dpr, cw, ch);
+  }
+  window.addEventListener('resize', draw);
+
+  function world(dpr) { var v = vt(); ctx.setTransform(dpr * v.s, 0, 0, dpr * v.s, dpr * v.x, dpr * v.y); return v; }
+
+  function message(dpr, text) {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#777'; ctx.font = '15px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText(text, cv.clientWidth / 2, cv.clientHeight / 2);
+    ctx.textAlign = 'start';
+  }
+
+  function drawPhoto(dpr) {
+    if (!S.src) { message(dpr, 'Choose a photo to start.'); return; }
+    var v = world(dpr);
+    ctx.drawImage(S.photo, 0, 0);
+    if (S.refMode === 'grid' && S.gridFit) {
+      // Fitted grid lines, so a wrong count or size is easy to spot.
+      var g = S.gridFit, step = Math.max(1, Math.ceil(Math.max(g.nx, g.ny) / 80));
+      ctx.strokeStyle = 'rgba(0,200,255,0.75)'; ctx.lineWidth = 1 / v.s;
+      ctx.beginPath();
+      for (var i = 0; i <= g.nx; i += step) { var a = TT.applyH(g.H, i * g.size, 0), b = TT.applyH(g.H, i * g.size, g.ny * g.size); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
+      for (var j = 0; j <= g.ny; j += step) { var c = TT.applyH(g.H, 0, j * g.size), d = TT.applyH(g.H, g.nx * g.size, j * g.size); ctx.moveTo(c[0], c[1]); ctx.lineTo(d[0], d[1]); }
+      ctx.stroke();
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var scr = function (p) { return [p[0] * v.s + v.x, p[1] * v.s + v.y]; };
+    var c4 = TT.orderCorners(S.corners).map(scr);
+    ctx.strokeStyle = '#e8590c'; ctx.lineWidth = 2;
+    ctx.beginPath(); c4.forEach(function (p, k) { ctx[k ? 'lineTo' : 'moveTo'](p[0], p[1]); }); ctx.closePath(); ctx.stroke();
+    S.corners.forEach(function (p) {
+      var q = scr(p);
+      ctx.beginPath(); ctx.arc(q[0], q[1], 10, 0, 7); ctx.fillStyle = 'rgba(232,89,12,0.3)'; ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(q[0] - 4, q[1]); ctx.lineTo(q[0] + 4, q[1]); ctx.moveTo(q[0], q[1] - 4); ctx.lineTo(q[0], q[1] + 4); ctx.stroke();
+    });
+    if (S.drag && S.drag.corner !== undefined) drawLoupe(S.corners[S.drag.corner]);
+  }
+
+  // Magnified view around a dragged handle, in the top-left corner.
+  function drawLoupe(p) {
+    var size = 180, zoom = 5, r = size / zoom / 2;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(10, 10, size, size); ctx.clip();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(S.photo, p[0] - r, p[1] - r, 2 * r, 2 * r, 10, 10, size, size);
+    ctx.restore();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.strokeRect(10, 10, size, size);
+    ctx.strokeStyle = '#e8590c';
+    ctx.beginPath(); ctx.moveTo(10 + size / 2, 10); ctx.lineTo(10 + size / 2, 10 + size);
+    ctx.moveTo(10, 10 + size / 2); ctx.lineTo(10 + size, 10 + size / 2); ctx.stroke();
+  }
+
+  function drawTrace(dpr) {
+    if (!S.warp) { message(dpr, S.src ? 'Set the scale reference first.' : 'Choose a photo to start.'); return; }
+    var wp = S.warp, v = world(dpr);
+    ctx.save();
+    ctx.translate(wp.ox, wp.oy); ctx.scale(wp.res, wp.res);
+    ctx.drawImage(S.warpCanvas, 0, 0);
+    if (S.overlay) ctx.drawImage(S.overlay, 0, 0);
+    ctx.restore();
+    ctx.strokeStyle = '#ffd400'; ctx.lineWidth = 2 / v.s;
+    ctx.beginPath();
+    S.shapes.forEach(function (sh) { sh.loops.forEach(function (l) { l.forEach(function (p, i) { ctx[i ? 'lineTo' : 'moveTo'](p[0], p[1]); }); ctx.closePath(); }); });
+    ctx.stroke();
+    // Brush stroke in progress.
+    if (S.stroke) {
+      ctx.strokeStyle = S.stroke.mode === 'add' ? 'rgba(255,60,0,0.6)' : 'rgba(255,255,255,0.7)';
+      ctx.lineWidth = 2 * S.stroke.r; ctx.lineCap = ctx.lineJoin = 'round';
+      ctx.beginPath(); S.stroke.pts.forEach(function (p, i) { ctx[i ? 'lineTo' : 'moveTo'](p[0], p[1]); });
+      if (S.stroke.pts.length === 1) ctx.lineTo(S.stroke.pts[0][0] + 0.01, S.stroke.pts[0][1]);
+      ctx.stroke();
+    }
+    // Size labels.
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = '600 12px system-ui';
+    S.shapes.forEach(function (sh) {
+      var b = shapeBox(sh), x = ((b[0] + b[2]) / 2) * v.s + v.x, y = b[3] * v.s + v.y + 16, t = (b[2] - b[0]).toFixed(0) + ' × ' + (b[3] - b[1]).toFixed(0) + ' mm';
+      var tw = ctx.measureText(t).width;
+      ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(x - tw / 2 - 5, y - 13, tw + 10, 18);
+      ctx.fillStyle = '#fff'; ctx.fillText(t, x - tw / 2, y);
+    });
+    drawRuler();
+  }
+
+  function drawRuler() {
+    var v = vt(), len = 50 * v.s, x = 16, y = cv.clientHeight - 16;
+    if (len < 20) len = 100 * v.s;
+    ctx.setTransform(window.devicePixelRatio || 1, 0, 0, window.devicePixelRatio || 1, 0, 0);
+    ctx.fillStyle = '#222'; ctx.fillRect(x, y - 3, len, 3);
+    ctx.font = '12px system-ui'; ctx.fillText(len === 50 * v.s ? '50 mm' : '100 mm', x, y - 7);
+  }
+
+  function depthColour(d, a) {
+    var max = Math.max(1, TT.maxDepth(L)), t = Math.min(1, d / max);
+    return 'hsla(' + (35 - 25 * t) + ',85%,' + (62 - 22 * t) + '%,' + a + ')';
+  }
+
+  function itemPath(it) {
+    ctx.beginPath();
+    placed(it).forEach(function (l) { l.forEach(function (p, i) { ctx[i ? 'lineTo' : 'moveTo'](p[0], p[1]); }); ctx.closePath(); });
+  }
+
+  // Rotate handle: just above the tool's top edge.
+  function rotHandle(it) {
+    var lp = placed(it)[0], top = Infinity;
+    lp.forEach(function (p) { top = Math.min(top, p[1]); });
+    return [it.x, top - L.clearance - 12 / vt().s];
+  }
+
+  function drawLayout(dpr) {
+    var W = TT.binSize(L.nx), H = TT.binSize(L.ny), v = world(dpr), pcs = TT.pieces(L);
+    ctx.beginPath();
+    pcs.forEach(function (pc) { roundRectPath(pc.ix * G.pitch, pc.iy * G.pitch, TT.binSize(pc.kx), TT.binSize(pc.ky), G.radius); });
+    ctx.fillStyle = '#fff'; ctx.fill();
+    ctx.strokeStyle = '#d6d6d2'; ctx.lineWidth = 1 / v.s; ctx.setLineDash([4 / v.s, 4 / v.s]);
+    ctx.beginPath();
+    for (var gx = 1; gx < L.nx; gx++) { ctx.moveTo(gx * G.pitch - 0.25, 0); ctx.lineTo(gx * G.pitch - 0.25, H); }
+    for (var gy = 1; gy < L.ny; gy++) { ctx.moveTo(0, gy * G.pitch - 0.25); ctx.lineTo(W, gy * G.pitch - 0.25); }
+    ctx.stroke(); ctx.setLineDash([]);
+    // Wall margin.
+    ctx.strokeStyle = 'rgba(180,35,24,0.25)'; ctx.lineWidth = 1 / v.s;
+    ctx.strokeRect(L.wall, L.wall, W - 2 * L.wall, H - 2 * L.wall);
+    // Pockets: clearance band (round-joined stroke) + the tool itself.
+    L.items.slice().sort(function (a, b) { return a.depth - b.depth; }).forEach(function (it) {
+      itemPath(it);
+      ctx.lineJoin = 'round';
+      if (L.clearance > 0) { ctx.strokeStyle = depthColour(it.depth, 0.45); ctx.lineWidth = 2 * L.clearance; ctx.stroke(); }
+      ctx.fillStyle = depthColour(it.depth, 0.8); ctx.fill('evenodd');
+      ctx.strokeStyle = it.uid === S.sel ? '#1c7ed6' : 'rgba(0,0,0,0.55)'; ctx.lineWidth = (it.uid === S.sel ? 2.5 : 1) / v.s; ctx.stroke();
+    });
+    L.notches.forEach(function (n) {
+      ctx.beginPath(); ctx.arc(n.x, n.y, n.d / 2, 0, 7);
+      ctx.fillStyle = depthColour(n.depth, 0.6); ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1 / v.s; ctx.stroke();
+    });
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5 / v.s;
+    ctx.beginPath();
+    pcs.forEach(function (pc) { roundRectPath(pc.ix * G.pitch, pc.iy * G.pitch, TT.binSize(pc.kx), TT.binSize(pc.ky), G.radius); });
+    ctx.stroke();
+    var it = selItem();
+    if (it) {
+      var hpt = rotHandle(it);
+      ctx.strokeStyle = '#1c7ed6'; ctx.lineWidth = 1.5 / v.s;
+      ctx.beginPath(); ctx.moveTo(it.x, it.y); ctx.lineTo(hpt[0], hpt[1]); ctx.stroke();
+      ctx.beginPath(); ctx.arc(hpt[0], hpt[1], 7 / v.s, 0, 7); ctx.fillStyle = '#fff'; ctx.fill(); ctx.stroke();
+    }
+    if (!L.items.length) message(dpr, S.libOrder.length ? 'Click “Add” next to a library shape.' : 'Trace some tools in Capture first.');
+    drawRuler();
+  }
+
+  function roundRectPath(x, y, w, h, r) {
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+
+  function drawModel(dpr, cw, ch) {
+    if (!S.preview) { message(dpr, L.items.length ? 'Press “Generate model”.' : 'Place some tools in Layout first.'); return; }
+    S.preview.draw(ctx, cw, ch);
+  }
+
+  // ---------- Pointer ----------
+
+  function hitItem(p) {
+    var v = vt();
+    for (var k = L.items.length - 1; k >= 0; k--) {
+      var it = L.items[k], loops = placed(it);
+      if (TT.pointInLoop(p, loops[0])) return it;
+      var near = loops[0].some(function (q, i) {
+        var r = loops[0][(i + 1) % loops[0].length], dx = r[0] - q[0], dy = r[1] - q[1], l2 = dx * dx + dy * dy || 1;
+        var t = Math.max(0, Math.min(1, ((p[0] - q[0]) * dx + (p[1] - q[1]) * dy) / l2));
+        return Math.hypot(p[0] - q[0] - t * dx, p[1] - q[1] - t * dy) < 5 / v.s;
+      });
+      if (near) return it;
+    }
+    return null;
+  }
+
+  function hitNotch(p) {
+    for (var k = L.notches.length - 1; k >= 0; k--) if (Math.hypot(L.notches[k].x - p[0], L.notches[k].y - p[1]) <= L.notches[k].d / 2) return L.notches[k];
+    return null;
+  }
+
+  cv.addEventListener('pointerdown', function (e) {
+    cv.focus();
+    var p = toWorld(e), v = vt();
+    if (e.button === 1 || e.button === 2) { // pan
+      if (S.phase !== 'generate') { S.drag = { pan: true, sx: e.clientX, sy: e.clientY, vx: v.x, vy: v.y }; v.fit = false; cv.setPointerCapture(e.pointerId); }
+      return;
+    }
+    if (S.phase === 'generate') {
+      if (S.preview) { S.drag = { orbit: true, sx: e.clientX, sy: e.clientY, yaw: S.preview.yaw, pitch: S.preview.pitch }; cv.setPointerCapture(e.pointerId); }
+      return;
+    }
+    if (S.phase === 'capture' && S.capView === 'photo' && S.corners) {
+      var best = -1, bd = 30 / v.s;
+      S.corners.forEach(function (c, i) { var d = Math.hypot(c[0] - p[0], c[1] - p[1]); if (d < bd) { bd = d; best = i; } });
+      if (best < 0) return;
+      S.drag = { corner: best, dx: S.corners[best][0] - p[0], dy: S.corners[best][1] - p[1] };
+    } else if (S.phase === 'capture' && S.capView === 'trace' && S.warp) {
+      if (S.capTool === 'pick') {
+        var l = labelAt(S.labels, p[0], p[1]);
+        if (!l) return;
+        var before = S.excluded.length;
+        S.excluded = S.excluded.filter(function (q) { return labelAt(S.labels, q[0], q[1]) !== l; });
+        if (S.excluded.length === before) S.excluded.push(p);
+        runFrom('edit');
+        return;
+      }
+      S.stroke = { mode: S.capTool, r: C.brush.get() / 2, pts: [p] };
+      S.drag = { stroke: true };
+      draw();
+    } else if (S.phase === 'layout') {
+      if (S.layTool === 'notch') {
+        var hn = hitNotch(p);
+        if (hn) L.notches.splice(L.notches.indexOf(hn), 1);
+        else L.notches.push({ x: p[0], y: p[1], d: C.notchD.get(), depth: C.notchDepth.get() });
+        layoutChanged(false);
+        return;
+      }
+      var it = selItem();
+      if (it) {
+        var hp = rotHandle(it);
+        if (Math.hypot(hp[0] - p[0], hp[1] - p[1]) < 10 / v.s) {
+          S.drag = { rotate: it, a0: Math.atan2(p[1] - it.y, p[0] - it.x), rot0: it.rot };
+          cv.setPointerCapture(e.pointerId);
+          return;
+        }
+      }
+      var hitI = hitItem(p), hitN = hitI ? null : hitNotch(p);
+      S.sel = hitI ? hitI.uid : null;
+      syncSel();
+      if (hitI || hitN) S.drag = { move: hitI || hitN, last: p, moved: false };
+      draw();
+    } else return;
+    cv.setPointerCapture(e.pointerId);
+  });
+
+  cv.addEventListener('pointermove', function (e) {
+    var d = S.drag;
+    if (!d) return;
+    if (d.pan) { var v = vt(); v.x = d.vx + e.clientX - d.sx; v.y = d.vy + e.clientY - d.sy; draw(); return; }
+    if (d.orbit) {
+      S.preview.yaw = d.yaw + (e.clientX - d.sx) * 0.01;
+      S.preview.pitch = Math.max(-0.2, Math.min(1.57, d.pitch + (e.clientY - d.sy) * 0.01));
+      draw(); return;
+    }
+    var p = toWorld(e);
+    if (d.corner !== undefined) { S.corners[d.corner] = [p[0] + d.dx, p[1] + d.dy]; draw(); }
+    else if (d.stroke) { S.stroke.pts.push(p); draw(); }
+    else if (d.rotate) {
+      var a = Math.atan2(p[1] - d.rotate.y, p[0] - d.rotate.x), r = d.rot0 + (a - d.a0) * 180 / Math.PI;
+      r = e.shiftKey ? Math.round(r / 15) * 15 : Math.round(r * 2) / 2;
+      d.rotate.rot = ((r + 540) % 360) - 180;
+      C.selRot.set(d.rotate.rot); draw();
+    } else if (d.move) {
+      d.move.x += p[0] - d.last[0]; d.move.y += p[1] - d.last[1]; d.last = p; d.moved = true; draw();
+    }
+  });
+
+  cv.addEventListener('pointerup', function () {
+    var d = S.drag;
+    S.drag = null;
+    if (!d) return;
+    if (d.corner !== undefined) { if (S.refMode === 'grid') fitGrid(); runFrom('warp'); }
+    else if (d.stroke) { S.strokes.push(S.stroke); S.stroke = null; runFrom('edit'); }
+    else if (d.rotate || (d.move && d.moved)) layoutChanged(true);
+    else draw();
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (S.phase !== 'layout' || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
+    var it = selItem();
+    if (!it) return;
+    var step = e.shiftKey ? 5 : 0.5, moved = true;
+    if (e.key === 'ArrowLeft') it.x -= step;
+    else if (e.key === 'ArrowRight') it.x += step;
+    else if (e.key === 'ArrowUp') it.y -= step;
+    else if (e.key === 'ArrowDown') it.y += step;
+    else if (e.key === 'r' || e.key === 'R') rotateSel(e.shiftKey ? -90 : 90);
+    else if (e.key === 'Delete' || e.key === 'Backspace') deleteSel();
+    else moved = false;
+    if (moved) { e.preventDefault(); if (e.key.indexOf('Arrow') === 0) layoutChanged(false); }
+  });
+
+  // ---------- Start ----------
+
+  try { var stored = localStorage.getItem('tooltrace.v2'); if (stored) load(JSON.parse(stored)); } catch (e) { /* storage unavailable or corrupt */ }
+  syncLayoutInputs(); renderLib(); describeLayout(); toolbar(); draw();
+  TT.app = { S: S, L: L, C: C, runFrom: runFrom, setPhase: setPhase, addItem: addItem, generate: generate, fitGrid: fitGrid };
 })();
