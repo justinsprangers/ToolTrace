@@ -377,6 +377,64 @@ var TT = window.TT = window.TT || {};
     dab(pts[pts.length - 1][0], pts[pts.length - 1][1]);
   };
 
+  // ---------- Smart keep / remove ----------
+
+  // CIELAB colour of every warped pixel (for colour-distance comparisons). Cache per warp.
+  TT.labImage = function (wp) {
+    var n = wp.w * wp.h, d = wp.data, lab = new Float32Array(n * 3);
+    function lin(c) { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+    function fn(t) { return t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116; }
+    var lut = new Float32Array(256);
+    for (var v = 0; v < 256; v++) lut[v] = lin(v);
+    for (var k = 0; k < n; k++) {
+      var r = lut[d[k * 4]], g = lut[d[k * 4 + 1]], b = lut[d[k * 4 + 2]];
+      var X = fn((0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047), Y = fn(0.2126 * r + 0.7152 * g + 0.0722 * b);
+      var Z = fn((0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883);
+      lab[k * 3] = 116 * Y - 16; lab[k * 3 + 1] = 500 * (X - Y); lab[k * 3 + 2] = 200 * (Y - Z);
+    }
+    return lab;
+  };
+
+  // Smart stroke (same idea as LaserEngraver's): the area under the brush, spread over connected
+  // pixels whose colour is within `tol` (ΔE) of a colour under the brush, no further than `reach`
+  // mm from the stroke. Keep strokes only add to the mask, remove strokes only take away.
+  TT.smartStroke = function (mask, wp, lab, st, tol, reach) {
+    var w = wp.w, h = wp.h, seed = new Uint8Array(w * h);
+    TT.paint(seed, wp, st.pts, st.r, 1);
+    var samples = [], seen = {}, queue = [], i;
+    for (i = 0; i < w * h; i++) {
+      if (!seed[i]) continue;
+      queue.push(i);
+      var L = lab[i * 3], A = lab[i * 3 + 1], B = lab[i * 3 + 2], key = Math.round(L / 3) + ',' + Math.round(A / 3) + ',' + Math.round(B / 3);
+      if (!seen[key]) { seen[key] = 1; samples.push([L, A, B]); }
+    }
+    if (samples.length > 96) { // keep an even spread of the colours seen
+      var step = samples.length / 96, sub = [];
+      for (i = 0; i < 96; i++) sub.push(samples[Math.floor(i * step)]);
+      samples = sub;
+    }
+    var near = TT.edt(seed, w, h, 1), reachPx2 = (reach / wp.res) * (reach / wp.res), tol2 = tol * tol;
+    var region = seed.slice();
+    function similar(k) {
+      var L = lab[k * 3], A = lab[k * 3 + 1], B = lab[k * 3 + 2];
+      for (var s = 0; s < samples.length; s++) {
+        var dl = L - samples[s][0], da = A - samples[s][1], db = B - samples[s][2];
+        if (dl * dl + da * da + db * db <= tol2) return true;
+      }
+      return false;
+    }
+    for (var q = 0; q < queue.length; q++) {
+      var p = queue[q], x = p % w, nb = [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, p >= w ? p - w : -1, p < w * (h - 1) ? p + w : -1];
+      for (var t = 0; t < 4; t++) {
+        var k = nb[t];
+        if (k < 0 || region[k] || near[k] > reachPx2 || !similar(k)) continue;
+        region[k] = 1; queue.push(k);
+      }
+    }
+    var val = st.mode === 'keep' ? 1 : 0;
+    for (i = 0; i < w * h; i++) if (region[i]) mask[i] = val;
+  };
+
   // ---------- Contours and outlines ----------
 
   // Marching squares on grid values f (w x h). Region f < 0 is "inside". Returns closed loops in
@@ -458,15 +516,15 @@ var TT = window.TT = window.TT || {};
     return out;
   };
 
-  // Resample a closed loop to even spacing, then Gaussian-smooth it (sigma in the same units).
-  TT.smoothLoop = function (loop, spacing, sigma) {
+  // Resample a closed loop to even spacing (returns the points; spacing may shrink slightly).
+  function resample(loop, spacing) {
     var n = loop.length, per = 0, i, k;
     for (i = 0; i < n; i++) { var a = loop[i], b = loop[(i + 1) % n]; per += Math.hypot(b[0] - a[0], b[1] - a[1]); }
-    var m = Math.max(8, Math.round(per / spacing)), ds = per / m, out = [], seg = 0, segPos = 0, segLen;
+    var m = Math.max(8, Math.round(per / spacing)), ds = per / m, out = [], seg = 0, segPos = 0, segLen, p, q;
     for (k = 0; k < m; k++) {
       var target = k * ds;
       while (true) {
-        var p = loop[seg % n], q = loop[(seg + 1) % n];
+        p = loop[seg % n]; q = loop[(seg + 1) % n];
         segLen = Math.hypot(q[0] - p[0], q[1] - p[1]);
         if (segPos + segLen >= target || seg > 2 * n) break;
         segPos += segLen; seg++;
@@ -474,15 +532,132 @@ var TT = window.TT = window.TT || {};
       var t = segLen ? (target - segPos) / segLen : 0;
       out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]);
     }
-    if (sigma <= 0) return out;
-    var r = Math.min(Math.ceil(3 * sigma / ds), (m >> 1) - 1), wts = [], wsum = 0;
-    for (k = -r; k <= r; k++) { var wv = Math.exp(-0.5 * (k * ds / sigma) * (k * ds / sigma)); wts.push(wv); wsum += wv; }
-    return out.map(function (_, idx) {
-      var x = 0, y = 0;
-      for (var kk = -r; kk <= r; kk++) { var pp = out[(idx + kk + m) % m], wv2 = wts[kk + r]; x += pp[0] * wv2; y += pp[1] * wv2; }
-      return [x / wsum, y / wsum];
+    return { pts: out, ds: ds };
+  }
+
+  // Turning angle (degrees) at each point, measured over chords of k points either side, so pixel
+  // noise (much shorter than the chords) hardly registers but real corners do.
+  function turning(pts, k) {
+    var m = pts.length, out = new Float32Array(m);
+    for (var i = 0; i < m; i++) {
+      var a = pts[(i - k + m) % m], p = pts[i], b = pts[(i + k) % m];
+      var ux = p[0] - a[0], uy = p[1] - a[1], vx = b[0] - p[0], vy = b[1] - p[1];
+      out[i] = Math.abs(Math.atan2(ux * vy - uy * vx, ux * vx + uy * vy)) * 180 / Math.PI;
+    }
+    return out;
+  }
+
+  // Clean one traced outline without losing its real shape:
+  // 1. corners (turning more than opt.corner degrees over ~2 mm) are found and pinned;
+  // 2. each stretch between corners is Gaussian-smoothed (sigma opt.smooth mm) with its ends fixed,
+  //    so noise goes but corners stay sharp (smoothing a gentle curve barely moves it);
+  // 3. stretches that are straight to within opt.straighten mm over at least 6 mm become exact lines;
+  //    curves are left as curves (no faceting).
+  // Returns {pts, corners: [indices into pts]}.
+  TT.cleanLoop = function (loop, opt) {
+    var rs = resample(loop, opt.spacing), pts = rs.pts, ds = rs.ds, m = pts.length, i;
+    // A real corner turns sharply over ~4 mm *and* still over ~8 mm; a bite or bump in the trace
+    // (from glare or mat lines) only shows up at the short scale.
+    var k = Math.max(2, Math.round(Math.max(4, 6 * opt.res) / ds));
+    var ang = turning(pts, k), ang2 = turning(pts, 2 * k), corners = [];
+    if (opt.corner < 180 && m > 8 * k) {
+      for (i = 0; i < m; i++) {
+        if (ang[i] < opt.corner || ang2[i] < 0.75 * opt.corner) continue;
+        var isMax = true;
+        for (var d = -k; d <= k && isMax; d++) if (d && (ang[(i + d + m) % m] > ang[i] || (ang[(i + d + m) % m] === ang[i] && d < 0))) isMax = false;
+        if (isMax) corners.push(i);
+      }
+    }
+    // Stretches between corners (one closed stretch if there are none).
+    var stretches = [];
+    if (!corners.length) stretches.push({ closed: true, pts: pts });
+    else corners.forEach(function (c, ci) {
+      var e = corners[(ci + 1) % corners.length], s = [];
+      for (var j = c; ; j = (j + 1) % m) { s.push(pts[j]); if (j === e && s.length > 1) break; }
+      stretches.push({ closed: false, pts: s });
     });
+    var out = [], outCorners = [];
+    stretches.forEach(function (st) {
+      var sm = opt.smooth > 0 ? robustSmooth(st.pts, st.closed, ds, 2 * opt.smooth) : st.pts;
+      if (opt.straighten > 0) sm = snapLines(sm, opt.straighten, Math.max(10, 20 * opt.straighten), st.closed);
+      if (!st.closed) { outCorners.push(out.length); sm = sm.slice(0, -1); } // next stretch starts with the shared corner
+      for (var q2 = 0; q2 < sm.length; q2++) out.push(sm[q2]);
+    });
+    return { pts: out, corners: outCorners };
   };
+
+  // Noise removal that keeps the real shape: each point is moved onto a quadratic fitted to its
+  // neighbours within `half` mm (so curves keep their curvature instead of shrinking), with robust
+  // re-weighting so one-sided bites and bumps (glare, mat lines) are ignored rather than averaged
+  // in. Open stretches keep their end points (the corners).
+  function robustSmooth(p, closed, ds, half) {
+    var n = p.length, h = Math.max(2, Math.round(half / ds));
+    if (!closed && n < 5) return p;
+    if (closed) h = Math.min(h, (n >> 1) - 1);
+    var len = 2 * h + 1, U = new Float64Array(len), V = new Float64Array(len), G = new Float64Array(len);
+    var W = new Float64Array(len), R = new Float64Array(len), gs = half / 1.5, out = new Array(n);
+    for (var i = 0; i < n; i++) {
+      var pi = p[i];
+      if (!closed && (i === 0 || i === n - 1)) { out[i] = pi; continue; }
+      var lo = closed ? i - h : Math.max(0, i - h), hi = closed ? i + h : Math.min(n - 1, i + h);
+      var A = p[closed ? (lo + n) % n : lo], B = p[closed ? hi % n : hi];
+      var tx = B[0] - A[0], ty = B[1] - A[1], tl = Math.hypot(tx, ty) || 1;
+      tx /= tl; ty /= tl;
+      var nx = -ty, ny = tx, m = 0, j, k;
+      for (j = lo; j <= hi; j++, m++) {
+        var q = p[closed ? (j + n) % n : j], dx = q[0] - pi[0], dy = q[1] - pi[1], u = dx * tx + dy * ty;
+        U[m] = u; V[m] = dx * nx + dy * ny; G[m] = W[m] = Math.exp(-0.5 * (u / gs) * (u / gs));
+      }
+      var a = 0;
+      for (var it = 0; it < 3; it++) {
+        // Weighted least squares v = a + b u + c u^2 (3x3 normal equations, Cramer's rule).
+        var s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, r0 = 0, r1 = 0, r2 = 0;
+        for (k = 0; k < m; k++) {
+          var w = W[k], u1 = U[k], u2 = u1 * u1, wv = w * V[k];
+          s0 += w; s1 += w * u1; s2 += w * u2; s3 += w * u2 * u1; s4 += w * u2 * u2;
+          r0 += wv; r1 += wv * u1; r2 += wv * u2;
+        }
+        var det = s0 * (s2 * s4 - s3 * s3) - s1 * (s1 * s4 - s3 * s2) + s2 * (s1 * s3 - s2 * s2);
+        if (Math.abs(det) < 1e-12) break;
+        a = (r0 * (s2 * s4 - s3 * s3) - s1 * (r1 * s4 - s3 * r2) + s2 * (r1 * s3 - s2 * r2)) / det;
+        var b = (s0 * (r1 * s4 - s3 * r2) - r0 * (s1 * s4 - s3 * s2) + s2 * (s1 * r2 - r1 * s2)) / det;
+        var c = (s0 * (s2 * r2 - r1 * s3) - s1 * (s1 * r2 - r1 * s2) + r0 * (s1 * s3 - s2 * s2)) / det;
+        if (it === 2) break;
+        // Bisquare weights from the residuals; scale from the weighted mean absolute residual
+        // (at least 0.05 mm), so a bite a few mm long gets ignored instead of averaged in.
+        var sa = 0, sw = 0;
+        for (k = 0; k < m; k++) { R[k] = Math.abs(V[k] - (a + b * U[k] + c * U[k] * U[k])); sa += G[k] * R[k]; sw += G[k]; }
+        var sc = 4.685 * Math.max(0.05, 1.25 * sa / sw);
+        for (k = 0; k < m; k++) { var z = R[k] / sc; W[k] = z < 1 ? G[k] * (1 - z * z) * (1 - z * z) : 0; }
+      }
+      out[i] = [pi[0] + a * nx, pi[1] + a * ny];
+    }
+    return out;
+  }
+
+  // Replace runs that are straight to within tol (and at least minLen long) by their end points.
+  // A run whose points all bow the same way is a gentle curve, not a line, and is left alone.
+  function snapLines(p, tol, minLen, closed) {
+    var n = p.length, out = [], s = 0;
+    function dev(a, b) {
+      var A = p[a], B = p[b], vx = B[0] - A[0], vy = B[1] - A[1], len = Math.hypot(vx, vy) || 1e-9, md = 0, sum = 0;
+      for (var i = a + 1; i < b; i++) {
+        var d = ((p[i][0] - A[0]) * vy - (p[i][1] - A[1]) * vx) / len;
+        md = Math.max(md, Math.abs(d)); sum += d;
+      }
+      var bow = b - a > 1 ? Math.abs(sum / (b - a - 1)) : 0;
+      return Math.max(md, 3 * bow);
+    }
+    var last = closed ? n - 1 : n - 1;
+    while (s < last) {
+      var e = s + 1;
+      while (e + 1 <= last && dev(s, e + 1) <= tol) e++;
+      if (Math.hypot(p[e][0] - p[s][0], p[e][1] - p[s][1]) >= minLen) { out.push(p[s]); s = e; }
+      else { out.push(p[s]); s++; }
+    }
+    out.push(p[last]);
+    return out;
+  }
 
   TT.loopArea = function (loop) {
     var a = 0;
@@ -499,23 +674,34 @@ var TT = window.TT = window.TT || {};
     return inside;
   };
 
-  // Outlines of every blob in a mask, as shapes {loops: [outer, holes...], cx, cy, area} in paper
-  // mm (y down). smooth = Gaussian sigma (mm), straighten = simplify tolerance (mm).
-  TT.extractShapes = function (mask, wp, smooth, straighten) {
-    var w = wp.w + 2, h = wp.h + 2, f = new Float32Array(w * h).fill(0.5), i, j;
-    // Blurred mask (3x3) so contours fall between pixels instead of on a staircase.
+  // Outlines of every blob in a mask, as shapes {loops: [outer, holes...], corners, cx, cy, area}
+  // in paper mm (y down). opt: score + threshold (for sub-pixel edges), smooth, straighten, corner
+  // (see TT.cleanLoop).
+  TT.extractShapes = function (mask, wp, opt) {
+    var w = wp.w + 2, h = wp.h + 2, f = new Float32Array(w * h).fill(1), i, j, sc = opt.score, thr = opt.threshold;
+    // Sub-pixel edges: the inside/outside decision comes from the mask, but how far each pixel is
+    // from the edge comes from the colour score (lightly blurred), so the contour lands where the
+    // colour actually changes instead of on the pixel staircase.
     for (j = 1; j < h - 1; j++) for (i = 1; i < w - 1; i++) {
-      var s = 0;
+      var x0 = i - 1, y0 = j - 1, s = 0, c = 0;
       for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) {
-        var x = i - 1 + dx, y = j - 1 + dy;
-        if (x >= 0 && y >= 0 && x < wp.w && y < wp.h) s += mask[y * wp.w + x];
+        var x = x0 + dx, y = y0 + dy;
+        if (x >= 0 && y >= 0 && x < wp.w && y < wp.h) { s += sc[y * wp.w + x]; c++; }
       }
-      f[j * w + i] = 0.5 - s / 9;
+      var mag = Math.min(1, Math.max(0.05, Math.abs(thr - s / c) / thr));
+      f[j * w + i] = mask[y0 * wp.w + x0] ? -mag : mag;
     }
+    var cornerList = [];
     var loops = TT.contours(f, w, h).map(function (l) {
       var mm = l.map(function (p) { return [wp.ox + (p[0] - 0.5) * wp.res, wp.oy + (p[1] - 0.5) * wp.res]; });
-      mm = TT.smoothLoop(mm, Math.min(0.25, wp.res / 2), smooth);
-      return TT.simplify(mm, Math.max(0.02, straighten));
+      var cl = TT.cleanLoop(mm, { spacing: Math.min(0.25, wp.res / 2), res: wp.res, smooth: opt.smooth, straighten: opt.straighten, corner: opt.corner });
+      var keep = new Uint8Array(cl.pts.length);
+      cl.corners.forEach(function (k) { keep[k] = 1; });
+      // Thin out points without moving the shape (corners always kept).
+      var pts = simplifyKeep(cl.pts, 0.02, keep);
+      cornerList.push(cl.corners.map(function (k) { return cl.pts[k]; }));
+      pts.corners = cornerList[cornerList.length - 1];
+      return pts;
     }).filter(function (l) { return l.length >= 3 && Math.abs(TT.loopArea(l)) > 4; });
     var outers = loops.filter(function (l) { return TT.loopArea(l) < 0; });
     var shapes = outers.map(function (o) {
@@ -524,14 +710,43 @@ var TT = window.TT = window.TT || {};
         var cr = o[m][0] * o[k][1] - o[k][0] * o[m][1];
         a += cr; cx += (o[m][0] + o[k][0]) * cr; cy += (o[m][1] + o[k][1]) * cr;
       }
-      return { loops: [o], area: Math.abs(a / 2), cx: cx / (3 * a), cy: cy / (3 * a) };
+      return { loops: [o], corners: o.corners.slice(), area: Math.abs(a / 2), cx: cx / (3 * a), cy: cy / (3 * a) };
     });
     loops.forEach(function (l) {
       if (TT.loopArea(l) < 0) return;
       var best = null;
       shapes.forEach(function (s) { if (TT.pointInLoop(l[0], s.loops[0]) && (!best || s.area < best.area)) best = s; });
-      if (best) best.loops.push(l);
+      if (best) { best.loops.push(l); best.corners = best.corners.concat(l.corners); }
     });
     return shapes;
   };
+
+  // Douglas-Peucker that always keeps the flagged points (splits the loop at them first).
+  function simplifyKeep(pts, tol, keep) {
+    var n = pts.length, idx = [];
+    for (var i = 0; i < n; i++) if (keep[i]) idx.push(i);
+    if (idx.length < 2) return TT.simplify(pts, tol);
+    var out = [];
+    idx.forEach(function (s, k) {
+      var e = idx[(k + 1) % idx.length], run = [];
+      for (var j = s; ; j = (j + 1) % n) { run.push(pts[j]); if (j === e && run.length > 1) break; }
+      out.push.apply(out, simplifyOpen(run, tol).slice(0, -1));
+    });
+    return out;
+  }
+
+  function simplifyOpen(p, tol) {
+    var n = p.length, keep = new Uint8Array(n), stack = [[0, n - 1]];
+    keep[0] = keep[n - 1] = 1;
+    while (stack.length) {
+      var sg = stack.pop(), s = sg[0], e = sg[1], A = p[s], B = p[e];
+      var vx = B[0] - A[0], vy = B[1] - A[1], len = Math.hypot(vx, vy) || 1e-12, md = -1, mi = -1;
+      for (var i = s + 1; i < e; i++) {
+        var d = Math.abs((p[i][0] - A[0]) * vy - (p[i][1] - A[1]) * vx) / len;
+        if (d > md) { md = d; mi = i; }
+      }
+      if (md > tol) { keep[mi] = 1; stack.push([s, mi], [mi, e]); }
+    }
+    return p.filter(function (_, i) { return keep[i]; });
+  }
 })();

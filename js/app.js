@@ -126,15 +126,28 @@
       }).join('') + '</div>';
     }
     if (S.phase === 'capture') {
-      html = seg('tbView', [['photo', 'Photo'], ['trace', 'Trace']], S.capView);
-      if (S.capView === 'trace') html += '<div class="sep"></div>' + seg('tbTool', [['pick', 'Pick', 'Click a shape to leave it out / bring it back'], ['erase', 'Erase', 'Paint to remove'], ['add', 'Add', 'Paint to add']], S.capTool);
+      html = seg('tbView', [['photo', 'Photo', 'Photo and reference handles (1)'], ['trace', 'Trace', 'Traced outlines and fix tools (2)']], S.capView);
+      if (S.capView === 'trace') {
+        html += '<div class="sep"></div>' + seg('tbTool', CAP_TOOLS.map(function (t) {
+          return [t[0], '<i class="dot" style="background:' + (STROKE_COLORS[t[0]] || 'transparent') + '"></i>' + t[1], t[3] + ' (' + t[2] + ')'];
+        }), S.capTool) +
+          '<label class="brush" title="Brush size ([ and ])">Brush <input type="range" id="tbBrush" min="4" max="120" value="' + S.brush + '"></label>' +
+          '<button class="b" id="tbUndo" title="Undo (Ctrl+Z)">Undo</button><button class="b" id="tbClear" title="Remove all fixes">Clear</button>' +
+          '<span class="count">' + (S.strokes.length + S.excluded.length) + (S.strokes.length + S.excluded.length === 1 ? ' fix' : ' fixes') + '</span>';
+      }
     } else if (S.phase === 'layout') {
-      html = seg('tbTool', [['select', 'Select'], ['notch', 'Notch']], S.layTool);
+      html = seg('tbTool', [['select', 'Select', 'Select, move, rotate (V)'], ['notch', 'Notch', 'Click to add or remove a finger notch (N)']], S.layTool) +
+        '<button class="b" id="tbUndo" title="Undo (Ctrl+Z)">Undo</button><button class="b" id="tbRedo" title="Redo (Ctrl+Y)">Redo</button>';
     }
-    html += '<div class="sep"></div><button class="b" id="tbFit">Fit view</button>';
+    html += '<div class="sep"></div><button class="b" id="tbFit" title="Fit view (F, or double-click)">Fit view</button><button class="b" id="tbKeys" title="Keyboard shortcuts (?)">Shortcuts</button>';
     tb.innerHTML = html;
     if ($('tbView')) segButtons('tbView', function (m) { S.capView = m; toolbar(); draw(); });
     if ($('tbTool')) segButtons('tbTool', function (m) { if (S.phase === 'capture') S.capTool = m; else S.layTool = m; draw(); });
+    if ($('tbBrush')) $('tbBrush').oninput = function () { S.brush = +this.value; draw(); };
+    if ($('tbUndo')) $('tbUndo').onclick = undo;
+    if ($('tbRedo')) $('tbRedo').onclick = redo;
+    if ($('tbClear')) $('tbClear').onclick = function () { if ((S.strokes.length || S.excluded.length) && confirm('Remove all fixes on this photo?')) { S.strokes = []; S.excluded = []; S.capHist = []; S.capRedo = []; runFrom('edit'); toolbar(); } };
+    $('tbKeys').onclick = function () { $('keys').showModal(); };
     $('tbFit').onclick = function () {
       var v = S.views[viewKey()];
       if (v) v.fit = true;
@@ -145,6 +158,18 @@
 
   // ---------- 1. Capture ----------
 
+  // Fix tools: same names, keys and colours as LaserEngraver. [id, label, key, tooltip]
+  var CAP_TOOLS = [
+    ['pan', 'Pan', 'P', 'Drag to pan'],
+    ['keep', 'Smart keep', 'K', 'Paint over a missed part: it spreads to the same colour nearby, and only adds'],
+    ['remove', 'Smart remove', 'R', 'Paint over a wrong area (e.g. between handles): it spreads to the same colour nearby, and only removes'],
+    ['paint_keep', 'Brush keep', 'B', 'Adds exactly what you paint'],
+    ['paint_remove', 'Brush erase', 'E', 'Removes exactly what you paint'],
+    ['pick', 'Pick shape', 'X', 'Click a shape to leave it out, click again to bring it back']
+  ];
+  var STROKE_COLORS = { keep: '#22c55e', remove: '#ef4444', paint_keep: '#38bdf8', paint_remove: '#f59e0b' };
+  S.brush = 30; S.capTool = 'keep'; S.capHist = []; S.capRedo = [];
+
   ctl('extendCtl', 'ext', 'Extend past reference', 0, 300, 5, 0, 'mm', function () { later('warp', function () { runFrom('warp'); }, 250); });
   ctl('traceCtls', 'threshold', 'Sensitivity', 0.05, 1.5, 0.01, 0.35, '', function () { traceInput('score'); });
   ctl('traceCtls', 'lumWeight', 'Brightness weight', 0, 3, 0.05, 1, '', function () { traceInput('score'); });
@@ -153,10 +178,12 @@
   ctl('traceCtls', 'close', 'Bridge gaps', 0, 6, 0.25, 1, 'mm', function () { traceInput('seg'); });
   ctl('traceCtls', 'minArea', 'Ignore shapes under', 0, 5000, 50, 300, 'mm²', function () { traceInput('seg'); });
   ctl('traceCtls', 'margin', 'Ignore edge', 0, 30, 1, 3, 'mm', function () { traceInput('seg'); });
-  ctl('brushCtl', 'brush', 'Brush size', 1, 40, 1, 6, 'mm', function () {});
-  // Smoothing rounds off sharp tips (pockets get slightly smaller there), so keep it modest.
-  ctl('outlineCtls', 'smooth', 'Smooth outline', 0, 5, 0.1, 0.4, 'mm', function () { traceInput('extract'); });
-  ctl('outlineCtls', 'straighten', 'Straighten', 0.02, 3, 0.02, 0.3, 'mm', function () { traceInput('extract'); });
+  ctl('brushCtl', 'smartTol', 'Smart colour match', 3, 40, 1, 12, 'ΔE', function () {});
+  ctl('brushCtl', 'smartReach', 'Smart reach', 3, 100, 1, 25, 'mm', function () {});
+  // Corners are pinned before smoothing, so smoothing only removes noise between them.
+  ctl('outlineCtls', 'smooth', 'Smooth noise', 0, 10, 0.5, 4, 'mm', function () { traceInput('extract'); });
+  ctl('outlineCtls', 'straighten', 'Snap straight edges', 0, 1.5, 0.05, 0.3, 'mm', function () { traceInput('extract'); });
+  ctl('outlineCtls', 'corner', 'Keep corners sharper than', 15, 180, 1, 35, '°', function () { traceInput('extract'); });
   ctl('depthCtl', 'depth', 'Pocket depth', 1, 60, 0.5, 15, 'mm', function () {});
   $('fillHoles').onchange = function () { traceInput('seg'); };
 
@@ -194,7 +221,6 @@
       fitGrid(); runFrom('warp', true);
     });
   };
-  $('clearEdits').onclick = function () { S.strokes = []; S.excluded = []; runFrom('edit'); };
   $('addShapes').onclick = addShapes;
 
   $('file').addEventListener('change', function () {
@@ -212,7 +238,7 @@
     c.width = Math.round(w * k); c.height = Math.round(h * k);
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
     S.photo = c; S.src = c.getContext('2d').getImageData(0, 0, c.width, c.height); S.gray = null;
-    S.strokes = []; S.excluded = []; S.warp = null; S.shapes = [];
+    S.strokes = []; S.excluded = []; S.capHist = []; S.capRedo = []; S.warp = null; S.lab = null; S.shapes = [];
     if (name) $('shapeName').value = name.replace(/\.[^.]+$/, '');
     S.views['capture-photo'] = { fit: true }; S.views['capture-trace'] = { fit: true };
     var c4 = S.refMode === 'paper' ? TT.detectPaper(S.src) : null;
@@ -270,8 +296,9 @@
       if (from <= 0 || !S.warp) {
         var ref = reference();
         if (!ref) { S.warp = null; S.shapes = []; draw(); return; }
-        var res = Math.max(0.25, Math.sqrt(ref.w * ref.h / 1.5e6));
+        var res = Math.max(0.2, Math.sqrt(ref.w * ref.h / 1.5e6)); // edges are sub-pixel, so this is plenty
         S.warp = TT.warp(S.src, ref.H, ref.x0, ref.y0, ref.w, ref.h, res);
+        S.lab = null;
         S.warpCanvas = toCanvas(S.warp.data, S.warp.w, S.warp.h);
         S.views['capture-trace'] = { fit: true };
         from = 1;
@@ -286,17 +313,25 @@
       }
       if (from <= 3 || !S.mask) applyEdits();
       var minArea = Math.max(20, C.minArea.get());
-      S.shapes = TT.extractShapes(S.mask, wp, C.smooth.get(), C.straighten.get()).filter(function (sh) { return sh.area >= minArea; });
+      S.shapes = TT.extractShapes(S.mask, wp, {
+        score: S.score.score, threshold: C.threshold.get(), smooth: C.smooth.get(), straighten: C.straighten.get(), corner: C.corner.get()
+      }).filter(function (sh) { return sh.area >= minArea; });
       describeShapes(performance.now() - t0);
       if (showTrace) { S.capView = 'trace'; toolbar(); }
       draw();
     });
   }
 
-  // Brush strokes, then shapes the user picked out (remembered as paper points).
+  // Fix strokes in the order they were made (smart ones spread by colour, brush ones are exact),
+  // then shapes the user picked out (remembered as paper points).
   function applyEdits() {
     var wp = S.warp, n = wp.w * wp.h, mask = S.segMask.slice();
-    S.strokes.forEach(function (st) { TT.paint(mask, wp, st.pts, st.r, st.mode === 'add' ? 1 : 0); });
+    S.strokes.forEach(function (st) {
+      if (st.mode === 'keep' || st.mode === 'remove') {
+        if (!S.lab) S.lab = TT.labImage(wp);
+        TT.smartStroke(mask, wp, S.lab, st, st.tol, st.reach);
+      } else TT.paint(mask, wp, st.pts, st.r, st.mode === 'paint_keep' ? 1 : 0);
+    });
     var comp = TT.components(mask, wp.w, wp.h), off = {};
     S.excluded.forEach(function (p) { var l = labelAt(comp.labels, p[0], p[1]); if (l) off[l] = 1; });
     var over = new Uint8ClampedArray(n * 4);
@@ -435,7 +470,7 @@
       if (f) { L.nx = f.nx; L.ny = f.ny; center(); }
       $('nx').value = L.nx; $('ny').value = L.ny;
     }
-    invalidate(); save(); syncSel(); describeLayout(); draw();
+    invalidate(); save(); syncSel(); describeLayout(); layoutSnapshot(); draw();
   }
 
   function invalidate() {
@@ -595,7 +630,7 @@
     var k = viewKey(), v = S.views[k] || (S.views[k] = { fit: true }), e = extents();
     if (v.fit && e) {
       var cw = cv.clientWidth, ch = cv.clientHeight, pad = 16;
-      v.s = Math.min((cw - 2 * pad) / (e[2] - e[0]), (ch - 2 * pad) / (e[3] - e[1]));
+      v.s = Math.max(1e-3, Math.min((cw - 2 * pad) / (e[2] - e[0]), (ch - 2 * pad) / (e[3] - e[1])));
       v.x = (cw - (e[2] - e[0]) * v.s) / 2 - e[0] * v.s; v.y = (ch - (e[3] - e[1]) * v.s) / 2 - e[1] * v.s;
     }
     return v;
@@ -691,14 +726,20 @@
     ctx.beginPath();
     S.shapes.forEach(function (sh) { sh.loops.forEach(function (l) { l.forEach(function (p, i) { ctx[i ? 'lineTo' : 'moveTo'](p[0], p[1]); }); ctx.closePath(); }); });
     ctx.stroke();
-    // Brush stroke in progress.
-    if (S.stroke) {
-      ctx.strokeStyle = S.stroke.mode === 'add' ? 'rgba(255,60,0,0.6)' : 'rgba(255,255,255,0.7)';
-      ctx.lineWidth = 2 * S.stroke.r; ctx.lineCap = ctx.lineJoin = 'round';
-      ctx.beginPath(); S.stroke.pts.forEach(function (p, i) { ctx[i ? 'lineTo' : 'moveTo'](p[0], p[1]); });
-      if (S.stroke.pts.length === 1) ctx.lineTo(S.stroke.pts[0][0] + 0.01, S.stroke.pts[0][1]);
+    // Corners the outline cleanup keeps sharp.
+    ctx.fillStyle = '#00c2ff';
+    S.shapes.forEach(function (sh) { sh.corners.forEach(function (p) { ctx.beginPath(); ctx.arc(p[0], p[1], 3 / v.s, 0, 7); ctx.fill(); }); });
+    // Fix strokes (faint) and the one being drawn.
+    function strokePath(st) {
+      ctx.strokeStyle = STROKE_COLORS[st.mode];
+      ctx.lineWidth = 2 * st.r; ctx.lineCap = ctx.lineJoin = 'round';
+      ctx.beginPath(); st.pts.forEach(function (p, i) { ctx[i ? 'lineTo' : 'moveTo'](p[0], p[1]); });
+      if (st.pts.length === 1) ctx.lineTo(st.pts[0][0] + 0.01, st.pts[0][1]);
       ctx.stroke();
     }
+    ctx.globalAlpha = 0.3; S.strokes.forEach(strokePath);
+    ctx.globalAlpha = 0.6; if (S.stroke) strokePath(S.stroke);
+    ctx.globalAlpha = 1;
     // Size labels.
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.font = '600 12px system-ui';
@@ -708,6 +749,14 @@
       ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(x - tw / 2 - 5, y - 13, tw + 10, 18);
       ctx.fillStyle = '#fff'; ctx.fillText(t, x - tw / 2, y);
     });
+    // Brush cursor.
+    if (S.mouse && STROKE_COLORS[S.capTool] && !S.space) {
+      var r = Math.max(1, S.brush / 2);
+      ctx.lineWidth = 1; ctx.strokeStyle = '#fff';
+      ctx.beginPath(); ctx.arc(S.mouse[0], S.mouse[1], r + 1, 0, 7); ctx.stroke();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = STROKE_COLORS[S.capTool];
+      ctx.beginPath(); ctx.arc(S.mouse[0], S.mouse[1], r, 0, 7); ctx.stroke();
+    }
     drawRuler();
   }
 
@@ -813,7 +862,8 @@
   cv.addEventListener('pointerdown', function (e) {
     cv.focus();
     var p = toWorld(e), v = vt();
-    if (e.button === 1 || e.button === 2) { // pan
+    var panTool = S.phase === 'capture' && S.capView === 'trace' && S.capTool === 'pan';
+    if (e.button === 1 || e.button === 2 || (S.space || panTool) && e.button === 0) { // pan
       if (S.phase !== 'generate') { S.drag = { pan: true, sx: e.clientX, sy: e.clientY, vx: v.x, vy: v.y }; v.fit = false; cv.setPointerCapture(e.pointerId); }
       return;
     }
@@ -830,14 +880,16 @@
       if (S.capTool === 'pick') {
         var l = labelAt(S.labels, p[0], p[1]);
         if (!l) return;
+        capEdit();
         var before = S.excluded.length;
         S.excluded = S.excluded.filter(function (q) { return labelAt(S.labels, q[0], q[1]) !== l; });
         if (S.excluded.length === before) S.excluded.push(p);
-        runFrom('edit');
+        runFrom('edit'); toolbar();
         return;
       }
-      S.stroke = { mode: S.capTool, r: C.brush.get() / 2, pts: [p] };
-      S.drag = { stroke: true };
+      // Brush size is in screen pixels (like LaserEngraver), stored as mm.
+      S.stroke = { mode: S.capTool, r: +(S.brush / 2 / v.s).toFixed(3), pts: [p], tol: C.smartTol.get(), reach: C.smartReach.get() };
+      S.drag = { stroke: true, sx: e.clientX, sy: e.clientY };
       draw();
     } else if (S.phase === 'layout') {
       if (S.layTool === 'notch') {
@@ -866,8 +918,9 @@
   });
 
   cv.addEventListener('pointermove', function (e) {
-    var d = S.drag;
-    if (!d) return;
+    var d = S.drag, rect = cv.getBoundingClientRect();
+    S.mouse = [e.clientX - rect.left, e.clientY - rect.top];
+    if (!d) { if (S.phase === 'capture' && S.capView === 'trace' && STROKE_COLORS[S.capTool]) draw(); return; }
     if (d.pan) { var v = vt(); v.x = d.vx + e.clientX - d.sx; v.y = d.vy + e.clientY - d.sy; draw(); return; }
     if (d.orbit) {
       S.preview.yaw = d.yaw + (e.clientX - d.sx) * 0.01;
@@ -876,7 +929,10 @@
     }
     var p = toWorld(e);
     if (d.corner !== undefined) { S.corners[d.corner] = [p[0] + d.dx, p[1] + d.dy]; draw(); }
-    else if (d.stroke) { S.stroke.pts.push(p); draw(); }
+    else if (d.stroke) {
+      if (Math.abs(e.clientX - d.sx) + Math.abs(e.clientY - d.sy) >= 3) { d.sx = e.clientX; d.sy = e.clientY; S.stroke.pts.push(p); }
+      draw();
+    }
     else if (d.rotate) {
       var a = Math.atan2(p[1] - d.rotate.y, p[0] - d.rotate.x), r = d.rot0 + (a - d.a0) * 180 / Math.PI;
       r = e.shiftKey ? Math.round(r / 15) * 15 : Math.round(r * 2) / 2;
@@ -892,29 +948,138 @@
     S.drag = null;
     if (!d) return;
     if (d.corner !== undefined) { if (S.refMode === 'grid') fitGrid(); runFrom('warp'); }
-    else if (d.stroke) { S.strokes.push(S.stroke); S.stroke = null; runFrom('edit'); }
+    else if (d.stroke) { capEdit(); S.strokes.push(S.stroke); S.stroke = null; runFrom('edit'); toolbar(); }
     else if (d.rotate || (d.move && d.moved)) layoutChanged(true);
     else draw();
   });
+  cv.addEventListener('pointerleave', function () { S.mouse = null; if (S.phase === 'capture') draw(); });
+  cv.addEventListener('dblclick', function (e) {
+    if (S.phase === 'layout' && (hitItem(toWorld(e)) || hitNotch(toWorld(e)))) return;
+    fitView();
+  });
+
+  function fitView() {
+    var v = S.views[viewKey()];
+    if (v) v.fit = true;
+    if (S.preview && S.phase === 'generate') S.preview.zoom = 1;
+    draw();
+  }
+
+  function zoomBy(k) {
+    if (S.phase === 'generate') { if (S.preview) { S.preview.zoom *= k; draw(); } return; }
+    var v = vt(), mx = cv.clientWidth / 2, my = cv.clientHeight / 2;
+    v.fit = false; v.x = mx - (mx - v.x) * k; v.y = my - (my - v.y) * k; v.s *= k;
+    draw();
+  }
+
+  // ---------- Undo / redo ----------
+
+  // Capture: snapshots of the fix lists, taken before each change.
+  function capEdit() {
+    S.capHist.push({ strokes: S.strokes.slice(), excluded: S.excluded.slice() });
+    if (S.capHist.length > 200) S.capHist.shift();
+    S.capRedo = [];
+  }
+  // Layout: snapshots after each change (see layoutChanged).
+  S.layHist = []; S.layIdx = -1;
+  function layoutSnapshot() {
+    var s = JSON.stringify({ items: L.items, notches: L.notches, nx: L.nx, ny: L.ny, autoSize: L.autoSize, clearance: L.clearance, wall: L.wall });
+    if (S.layHist[S.layIdx] === s) return;
+    S.layHist = S.layHist.slice(0, S.layIdx + 1);
+    S.layHist.push(s);
+    if (S.layHist.length > 200) S.layHist.shift();
+    S.layIdx = S.layHist.length - 1;
+  }
+  function layoutRestore(s) {
+    var d = JSON.parse(s);
+    Object.keys(d).forEach(function (k) { L[k] = d[k]; });
+    if (!selItem()) S.sel = null;
+    syncLayoutInputs(); invalidate(); save(); syncSel(); describeLayout(); draw();
+  }
+
+  function undo() {
+    if (S.phase === 'capture') {
+      var h = S.capHist.pop();
+      if (!h) return;
+      S.capRedo.push({ strokes: S.strokes, excluded: S.excluded });
+      S.strokes = h.strokes; S.excluded = h.excluded;
+      runFrom('edit'); toolbar();
+    } else if (S.phase === 'layout' && S.layIdx > 0) layoutRestore(S.layHist[--S.layIdx]);
+  }
+
+  function redo() {
+    if (S.phase === 'capture') {
+      var h = S.capRedo.pop();
+      if (!h) return;
+      S.capHist.push({ strokes: S.strokes, excluded: S.excluded });
+      S.strokes = h.strokes; S.excluded = h.excluded;
+      runFrom('edit'); toolbar();
+    } else if (S.phase === 'layout' && S.layIdx < S.layHist.length - 1) layoutRestore(S.layHist[++S.layIdx]);
+  }
+
+  // ---------- Keyboard (same keys as LaserEngraver where they exist; list in the Shortcuts dialog) ----------
+
+  function setCapTool(t) {
+    S.capTool = t;
+    if (S.capView !== 'trace') S.capView = 'trace';
+    toolbar(); draw();
+  }
 
   document.addEventListener('keydown', function (e) {
-    if (S.phase !== 'layout' || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
-    var it = selItem();
-    if (!it) return;
-    var step = e.shiftKey ? 5 : 0.5, moved = true;
-    if (e.key === 'ArrowLeft') it.x -= step;
-    else if (e.key === 'ArrowRight') it.x += step;
-    else if (e.key === 'ArrowUp') it.y -= step;
-    else if (e.key === 'ArrowDown') it.y += step;
-    else if (e.key === 'r' || e.key === 'R') rotateSel(e.shiftKey ? -90 : 90);
-    else if (e.key === 'Delete' || e.key === 'Backspace') deleteSel();
-    else moved = false;
-    if (moved) { e.preventDefault(); if (e.key.indexOf('Arrow') === 0) layoutChanged(false); }
+    if ($('keys').open) return;
+    var t = e.target, typing = t instanceof Element && t.matches('input[type=number], input[type=text], select, textarea');
+    var ctrl = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
+    if (ctrl && !typing) {
+      if (k === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+      else if (k === 'y') { e.preventDefault(); redo(); }
+      else if (k === 's') { e.preventDefault(); $('saveProject').click(); }
+      else if (k === 'd' && S.phase === 'layout') { e.preventDefault(); $('dup').click(); }
+      return;
+    }
+    if (typing || ctrl || e.altKey) return;
+    if (e.key === ' ') { e.preventDefault(); S.space = true; cv.style.cursor = 'grab'; draw(); return; }
+    if (e.key === '?') { $('keys').showModal(); return; }
+    if (k === 'f' || e.key === '0') { fitView(); return; }
+    if (e.key === '+' || e.key === '=') { zoomBy(1.25); return; }
+    if (e.key === '-') { zoomBy(0.8); return; }
+    if (S.phase === 'capture') {
+      var tool = CAP_TOOLS.find(function (c) { return c[2].toLowerCase() === k; });
+      if (e.key === '1') { S.capView = 'photo'; toolbar(); draw(); }
+      else if (e.key === '2') { S.capView = 'trace'; toolbar(); draw(); }
+      else if (tool) setCapTool(tool[0]);
+      else if (e.key === 'Escape') setCapTool('pan');
+      else if (e.key === '[' || e.key === ']') {
+        S.brush = Math.min(120, Math.max(4, Math.round(S.brush * (e.key === ']' ? 1.2 : 1 / 1.2))));
+        toolbar(); draw();
+      } else if (e.key === 'Enter') addShapes();
+      return;
+    }
+    if (S.phase === 'layout') {
+      if (k === 'v') { S.layTool = 'select'; toolbar(); return; }
+      if (k === 'n') { S.layTool = 'notch'; toolbar(); return; }
+      if (e.key === 'Escape') { S.sel = null; S.layTool = 'select'; toolbar(); syncSel(); draw(); return; }
+      var it = selItem();
+      if (!it) return;
+      var step = e.shiftKey ? 5 : 0.5, moved = true;
+      if (e.key === 'ArrowLeft') it.x -= step;
+      else if (e.key === 'ArrowRight') it.x += step;
+      else if (e.key === 'ArrowUp') it.y -= step;
+      else if (e.key === 'ArrowDown') it.y += step;
+      else if (k === 'r') rotateSel(e.shiftKey ? -90 : 90);
+      else if (e.key === 'Delete' || e.key === 'Backspace') deleteSel();
+      else moved = false;
+      if (moved) { e.preventDefault(); if (e.key.indexOf('Arrow') === 0) layoutChanged(false); }
+      return;
+    }
+    if (S.phase === 'generate' && k === 'g') generate();
+  });
+  document.addEventListener('keyup', function (e) {
+    if (e.key === ' ') { S.space = false; cv.style.cursor = ''; draw(); }
   });
 
   // ---------- Start ----------
 
   try { var stored = localStorage.getItem('tooltrace.v2'); if (stored) load(JSON.parse(stored)); } catch (e) { /* storage unavailable or corrupt */ }
-  syncLayoutInputs(); renderLib(); describeLayout(); toolbar(); draw();
+  syncLayoutInputs(); renderLib(); describeLayout(); layoutSnapshot(); toolbar(); draw();
   TT.app = { S: S, L: L, C: C, runFrom: runFrom, setPhase: setPhase, addItem: addItem, generate: generate, fitGrid: fitGrid };
 })();

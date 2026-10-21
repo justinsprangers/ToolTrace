@@ -15,16 +15,25 @@ It works in three steps (tabs at the top).
    - Shiny or pale parts are missed: lower **Sensitivity**.
    - Tools merge together: lower **Bridge gaps**.
    - On a mat, **Remove thin lines** wipes out the grid. Leave it at 0 on paper, because it also blunts sharp tips.
-4. **Fix up** with the tools above the picture:
-   - **Pick:** click a shape to leave it out (grey); click it again to bring it back.
-   - **Erase / Add:** paint away areas (e.g. between snip handles) or paint in missed parts. Set the **Brush size** first.
-   - **Smooth outline** and **Straighten** clean up wobbly edges. Too much rounds off sharp tips.
-5. **Save outlines:** give them a name and a default pocket depth, then **Add to library**. Every traced shape becomes its own library entry.
+4. **Fix up** with the tools above the Trace view. They work like LaserEngraver's fix tools.
+   - **Smart keep (K):** paint over a part that was missed. It spreads to nearby pixels of the same colour and only ever adds.
+   - **Smart remove (R):** paint over something wrongly included, e.g. the mat between snip handles. It spreads to the same colour and only ever removes.
+   - **Smart colour match** and **Smart reach** control how far a smart stroke spreads.
+   - **Brush keep / Brush erase (B / E):** change exactly the pixels you paint.
+   - **Pick shape (X):** click a shape to leave it out (grey); click it again to bring it back.
+   - **[ ]** change the brush size, **Ctrl+Z / Ctrl+Y** undo and redo. Strokes are drawn faintly in their tool colour.
+5. **Outline:** cleans up noise in the trace without changing the real shape.
+   - Corners are found first (cyan dots) and kept sharp. **Keep corners sharper than** sets which bends count as corners.
+   - **Smooth noise** fits a gentle curve along each stretch between corners. It ignores small bites and bumps (glare, mat lines) instead of averaging them in, and curves keep their curvature. 4 mm suits most tools; lower it for small detailed parts.
+   - **Snap straight edges** turns runs that are straight within that tolerance into exact lines. Gentle curves are left alone, so arcs don't turn into facets.
+6. **Save outlines:** give them a name and a default pocket depth, then **Add to library**. Every traced shape becomes its own library entry.
+
+Press **?** (or **Shortcuts** above the picture) for every keyboard shortcut.
 
 ## 2. Layout: shapes → bin
 - **Add** a library shape to put it in the bin.
 - Drag it to move it, and drag the round handle to rotate (hold Shift to snap to 15°).
-- Keys: arrow keys nudge it (Shift for bigger steps), R rotates 90°, Delete removes it.
+- Keys: arrow keys nudge it (Shift for bigger steps), R rotates 90°, Ctrl+D duplicates, Delete removes it, Ctrl+Z / Ctrl+Y undo and redo.
 - **Selected** panel: pocket depth, exact rotation, Straighten (smallest box), Flip (tool lying the other side up), Duplicate, Remove.
 - **Finger notches:** pick **Notch** above the picture and click to add one. Click a notch again to remove it. Each notch has its own diameter and depth.
 - **Bin:** **Clearance** is the gap around every tool (1 mm is a good start), and **Min wall** is the minimum material left at the bin edge. With **Fit bin to the tools automatically** on, the bin size follows the tools. Turn it off to set the units yourself.

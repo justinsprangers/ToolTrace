@@ -60,7 +60,7 @@
   #view { position: relative; display: flex; flex-direction: column; min-width: 0; }
   #toolbar { display: flex; gap: 6px; padding: 8px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--line); background: #fbfbfa; }
   #toolbar .seg { margin: 0; }
-  #toolbar .seg button { padding: 4px 10px; }
+  #toolbar .seg button { padding: 4px 10px; white-space: nowrap; }
   #toolbar .sep { width: 1px; height: 22px; background: var(--line); }
   #cv { flex: 1; width: 100%; min-height: 0; touch-action: none; display: block; outline: none; }
   #status { padding: 6px 12px; font-size: 13px; color: var(--mute); border-top: 1px solid var(--line); background: var(--panel); min-height: 31px; }
@@ -70,6 +70,17 @@
   details summary { cursor: pointer; font-weight: 600; }
   details li { margin: 4px 0; }
   .downloads { display: flex; flex-direction: column; gap: 6px; }
+  #toolbar .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: 0; }
+  #toolbar .brush { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--mute); }
+  #toolbar .brush input { width: 90px; accent-color: var(--accent); }
+  #toolbar .count { font-size: 12.5px; color: var(--mute); }
+  dialog { border: 1px solid var(--line); border-radius: 10px; padding: 16px 20px; max-width: 560px; }
+  dialog::backdrop { background: rgba(0,0,0,.25); }
+  dialog h3 { margin: 12px 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--mute); }
+  dialog table { border-collapse: collapse; width: 100%; }
+  dialog td { padding: 3px 6px; border-bottom: 1px solid #eee; }
+  dialog td:first-child { width: 150px; }
+  kbd { font: 12px ui-monospace, Consolas, monospace; background: #f3f3f1; border: 1px solid #ccc; border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
   @media (max-width: 820px) {
     main { grid-template-columns: 1fr; grid-template-rows: auto 75vh; height: auto; }
     aside { border-right: 0; }
@@ -139,9 +150,12 @@
     </section>
     <section>
       <h2>Fix up</h2>
-      <p class="hint">Use the tools above the picture (Trace view): <b>Pick</b> clicks a shape to leave it out, <b>Erase</b> paints away areas (e.g. between handles), <b>Add</b> paints in missed parts.</p>
+      <p class="hint">Tools above the Trace view: <b>Smart keep</b> (K) paints over a missed part and spreads to the same colour; <b>Smart remove</b> (R) does the same for a wrong area, e.g. the mat between snip handles. Smart keep only adds and smart remove only removes. <b>Brush keep / erase</b> (B / E) change exactly what you paint. <b>Pick shape</b> (X) leaves a whole shape out. [ and ] change the brush size; Ctrl+Z undoes.</p>
       <div id="brushCtl"></div>
-      <div class="btns"><button class="b" id="clearEdits">Clear edits</button></div>
+    </section>
+    <section>
+      <h2>Outline</h2>
+      <p class="hint">Cyan dots are corners that stay sharp. Smoothing only removes noise between them, and straight runs snap to exact lines while curves stay curves.</p>
       <div id="outlineCtls"></div>
     </section>
     <section>
@@ -218,6 +232,42 @@
   <div id="status">Choose a photo to start.</div>
 </div>
 </main>
+<dialog id="keys">
+  <form method="dialog" style="float:right"><button class="b">Close</button></form>
+  <h2 style="margin-top:4px">Keyboard shortcuts</h2>
+  <h3>Everywhere</h3>
+  <table>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>Undo / redo (fixes in Capture, changes in Layout)</td></tr>
+    <tr><td><kbd>F</kbd> or <kbd>0</kbd>, double-click</td><td>Fit view</td></tr>
+    <tr><td><kbd>+</kbd> / <kbd>-</kbd>, mouse wheel</td><td>Zoom</td></tr>
+    <tr><td><kbd>Space</kbd> held, right-drag</td><td>Pan</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save project</td></tr>
+    <tr><td><kbd>?</kbd></td><td>This list</td></tr>
+  </table>
+  <h3>Capture</h3>
+  <table>
+    <tr><td><kbd>1</kbd> / <kbd>2</kbd></td><td>Photo view / Trace view</td></tr>
+    <tr><td><kbd>K</kbd></td><td>Smart keep</td></tr>
+    <tr><td><kbd>R</kbd></td><td>Smart remove</td></tr>
+    <tr><td><kbd>B</kbd> / <kbd>E</kbd></td><td>Brush keep / brush erase</td></tr>
+    <tr><td><kbd>X</kbd></td><td>Pick shape (leave out / bring back)</td></tr>
+    <tr><td><kbd>P</kbd> or <kbd>Esc</kbd></td><td>Pan tool</td></tr>
+    <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Smaller / bigger brush</td></tr>
+    <tr><td><kbd>Enter</kbd></td><td>Add outlines to the library</td></tr>
+  </table>
+  <h3>Layout</h3>
+  <table>
+    <tr><td><kbd>V</kbd> / <kbd>N</kbd></td><td>Select tool / notch tool</td></tr>
+    <tr><td>Arrow keys</td><td>Nudge 0.5 mm (<kbd>Shift</kbd>: 5 mm)</td></tr>
+    <tr><td><kbd>R</kbd> / <kbd>Shift</kbd>+<kbd>R</kbd></td><td>Rotate 90° / back</td></tr>
+    <tr><td><kbd>Shift</kbd> while rotating</td><td>Snap to 15°</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>D</kbd></td><td>Duplicate</td></tr>
+    <tr><td><kbd>Delete</kbd></td><td>Remove</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Deselect</td></tr>
+  </table>
+  <h3>Generate</h3>
+  <table><tr><td><kbd>G</kbd></td><td>Generate model</td></tr></table>
+</dialog>
 <script src="js/earcut.js"></script>
 <script src="js/vision.js"></script>
 <script src="js/grid.js"></script>
