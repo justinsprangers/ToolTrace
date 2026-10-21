@@ -22,6 +22,8 @@ Offline page: photos of tools → traced outlines (library) → Gridfinity bin l
 - Accuracy: a synthetic letter sheet in perspective with a 100 × 40 mm rectangle traces to 100.0 × 40.0 mm in Paper mode.
 - After geometry changes, Generate must report "Mesh check passed" (every shell closed, positive volume) for split bins, multiple depths and notches.
 
+## Repo
+- This folder is its own git repo (branch `main`, MIT), ignored by the parent `C:\Claude` repo; history before the split came from there via `git subtree split`. No remote yet: don't push or publish unless the user asks. Never commit `test-photos/` or anything from the private `C:\Claude` repo.
+
 ## Not built yet
 - Stacking lip, magnet/screw holes, editing outline vertices directly, auto-arrange.
-- This folder should become its own git repo (like LaserBoxes) once the user is happy with it.

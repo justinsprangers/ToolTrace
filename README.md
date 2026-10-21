@@ -55,3 +55,6 @@ It works in three steps (tabs at the top).
 - `js/preview3d.js`: 3D preview (software z-buffer).
 - `js/earcut.js`: polygon triangulation (port of mapbox/earcut, ISC license).
 - `js/app.js`: the UI.
+
+## License
+MIT (see `LICENSE`). `js/earcut.js` is a port of mapbox/earcut (ISC).
