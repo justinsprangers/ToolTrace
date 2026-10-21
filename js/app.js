@@ -166,12 +166,10 @@
   var CAP_TOOLS = [
     ['select', 'Select', 'V', 'Click a shape to select it, then drag its nodes; click the outline to add a node'],
     ['pan', 'Pan', 'P', 'Drag to pan'],
-    ['keep', 'Smart keep', 'K', 'Paint over a missed part: it spreads to the same colour nearby, and only adds'],
-    ['remove', 'Smart remove', 'R', 'Paint over a wrong area (e.g. between handles): it spreads to the same colour nearby, and only removes'],
     ['paint_keep', 'Brush keep', 'B', 'Adds exactly what you paint'],
     ['paint_remove', 'Brush erase', 'E', 'Removes exactly what you paint']
   ];
-  var STROKE_COLORS = { keep: '#22c55e', remove: '#ef4444', paint_keep: '#38bdf8', paint_remove: '#f59e0b' };
+  var STROKE_COLORS = { paint_keep: '#38bdf8', paint_remove: '#f59e0b' };
   S.brush = 30; S.capTool = 'select'; S.capHist = []; S.capRedo = [];
   // Per-shape edits, found again after a re-trace by the point `at` inside the shape:
   // {at, off (left out), set (own outline settings or null), nodes (hand-edited node loops or null)}.
@@ -185,8 +183,6 @@
   ctl('traceCtls', 'close', 'Bridge gaps', 0, 6, 0.25, 1, 'mm', function () { traceInput('seg'); });
   ctl('traceCtls', 'minArea', 'Ignore shapes under', 0, 5000, 50, 300, 'mm²', function () { traceInput('seg'); });
   ctl('traceCtls', 'margin', 'Ignore edge', 0, 30, 1, 3, 'mm', function () { traceInput('seg'); });
-  ctl('brushCtl', 'smartTol', 'Smart colour match', 3, 40, 1, 12, 'ΔE', function () {});
-  ctl('brushCtl', 'smartReach', 'Smart reach', 3, 100, 1, 25, 'mm', function () {});
   // Outline settings: the defaults for every shape; a selected shape can have its own (sh_*).
   // Corners are pinned before smoothing, so smoothing only removes noise between them.
   var SET_CTLS = [
@@ -199,6 +195,7 @@
     ctl('outlineCtls', c[0], c[1], c[2], c[3], c[4], c[5], c[6], function () { traceInput('fit'); });
     ctl('shapeCtls', 'sh_' + c[0], c[1], c[2], c[3], c[4], c[5], c[6], function () { shapeSettingsChanged(); });
   });
+  ctl('symCtls', 'sh_axis', 'Axis angle', 0, 180, 0.5, 90, '°', function (v) { axisChanged(v); });
   function globalSet() { return { smooth: C.smooth.get(), straighten: C.straighten.get(), corner: C.corner.get(), fit: Math.max(0.1, C.fit.get()) }; }
   ctl('depthCtl', 'depth', 'Pocket depth', 1, 60, 0.5, 15, 'mm', function () {});
   $('fillHoles').onchange = function () { traceInput('seg'); };
@@ -340,15 +337,10 @@
     });
   }
 
-  // Fix strokes in the order they were made (smart ones spread by colour, brush ones are exact).
+  // Brush strokes, in the order they were made.
   function applyEdits() {
     var wp = S.warp, n = wp.w * wp.h, mask = S.segMask.slice();
-    S.strokes.forEach(function (st) {
-      if (st.mode === 'keep' || st.mode === 'remove') {
-        if (!S.lab) S.lab = TT.labImage(wp);
-        TT.smartStroke(mask, wp, S.lab, st, st.tol, st.reach);
-      } else TT.paint(mask, wp, st.pts, st.r, st.mode === 'paint_keep' ? 1 : 0);
-    });
+    S.strokes.forEach(function (st) { TT.paint(mask, wp, st.pts, st.r, st.mode === 'paint_keep' ? 1 : 0); });
     var over = new Uint8ClampedArray(n * 4);
     for (var i = 0; i < n; i++) if (mask[i]) { over[i * 4] = 255; over[i * 4 + 1] = 50; over[i * 4 + 3] = 70; }
     S.mask = mask;
@@ -362,14 +354,28 @@
     S.shapes = S.traced.map(function (t) {
       var e = null;
       for (var i = 0; i < S.edits.length; i++) if (!used[i] && TT.pointInLoop(S.edits[i].at, t.raw[0])) { e = S.edits[i]; used[i] = 1; break; }
-      var nodes = e && e.nodes ? e.nodes : t.raw.map(function (l) { return TT.fitNodes(l, e && e.set ? e.set : gset, res); });
-      return finishShape({ traced: t, edit: e, nodes: nodes });
+      return finishShape({ traced: t, edit: e, nodes: e && e.nodes ? e.nodes : autoNodes(t, e, gset) });
     });
     if (S.selAt) {
       S.cSel = S.shapes.find(function (sh) { return TT.pointInLoop(S.selAt, sh.path[0]); }) || null;
       if (!S.cSel) S.selNode = null;
     }
     renderShapeList();
+  }
+
+  // Nodes fitted to a traced shape (own settings or the global ones). A symmetric shape is first
+  // averaged with its mirror image, then its nodes are mirrored so the outline is exactly symmetric.
+  function autoNodes(t, e, gset) {
+    var set = e && e.set ? e.set : gset || globalSet(), raw = t.raw;
+    if (e && e.sym) {
+      var key = JSON.stringify(e.sym);
+      if (!t.symCache || t.symCache.key !== key) t.symCache = { key: key, loops: TT.symmetrize(t.raw, e.sym) };
+      raw = t.symCache.loops;
+    }
+    return raw.map(function (l) {
+      var n = TT.fitNodes(l, set, S.warp.res);
+      return e && e.sym ? TT.mirrorNodes(n, e.sym, 1) : n;
+    });
   }
 
   // Cache the drawn path and size of a shape from its nodes.
@@ -425,19 +431,50 @@
     if (!sh || !sh.edit || !sh.edit.nodes) return;
     capEdit(); sh.edit.nodes = null; refitSelected();
   };
-  $('shOff').onchange = function () { if (S.cSel) toggleOff(S.cSel); };
 
   function refitSelected() {
     var sh = S.cSel, e = sh.edit;
-    sh.nodes = e.nodes || sh.traced.raw.map(function (l) { return TT.fitNodes(l, e.set || globalSet(), S.warp.res); });
+    sh.nodes = e.nodes || autoNodes(sh.traced, e);
     finishShape(sh); S.selNode = null;
     renderShapeList(); draw();
   }
 
-  // The node loops of a shape just changed by hand: keep them as the shape's edit.
-  function nodesEdited(sh) {
+  // Symmetric outline for the selected shape: find the best mirror axis, then average the halves.
+  $('shSym').onchange = function () {
+    var sh = S.cSel;
+    if (!sh) return;
+    capEdit();
+    var e = ensureEdit(sh);
+    e.sym = this.checked ? TT.findAxis(sh.traced.raw) : null;
+    e.nodes = null;
+    refitSelected();
+  };
+  $('shFindAxis').onclick = function () {
+    var sh = S.cSel;
+    if (!sh || !sh.edit || !sh.edit.sym) return;
+    capEdit(); sh.edit.sym = TT.findAxis(sh.traced.raw); sh.edit.nodes = null; refitSelected();
+  };
+  function axisChanged(v) {
+    var sh = S.cSel;
+    if (!sh || !sh.edit || !sh.edit.sym) return;
+    later('axis', function () { capEdit(); sh.edit.sym = Object.assign({}, sh.edit.sym, { a: v }); sh.edit.nodes = null; refitSelected(); }, 150);
+  }
+  $('shDel').onclick = function () { if (S.cSel) toggleOff(S.cSel); };
+
+  // The node loops of a shape just changed by hand: keep them as the shape's edit. For a
+  // symmetric shape, `side` (the side of the axis that was edited) is mirrored onto the other.
+  function nodesEdited(sh, side) {
+    if (side && sh.edit && sh.edit.sym) sh.nodes = sh.nodes.map(function (l) { return TT.mirrorNodes(l, sh.edit.sym, side); });
     ensureEdit(sh).nodes = sh.nodes;
     finishShape(sh);
+  }
+
+  // Which side of the selected shape's axis a point is on (+1 / -1), or 0 if not symmetric.
+  function axisSide(sh, p) {
+    var ax = sh.edit && sh.edit.sym;
+    if (!ax) return 0;
+    var a = ax.a * Math.PI / 180;
+    return ((p[0] - ax.p[0]) * -Math.sin(a) + (p[1] - ax.p[1]) * Math.cos(a)) >= 0 ? 1 : -1;
   }
 
   function renderShapeList() {
@@ -459,14 +496,19 @@
     if (sel) {
       var own = !!(sel.edit && sel.edit.set), s = own ? sel.edit.set : globalSet();
       $('shTitle').textContent = 'Shape ' + (shapeIndex(sel) + 1);
-      $('shOff').checked = !sel.off;
+      $('shDel').textContent = sel.off ? 'Include shape (Del)' : 'Exclude shape (Del)';
       $('shOwn').checked = own;
+      var sym = sel.edit && sel.edit.sym;
+      $('shSym').checked = !!sym;
+      $('symCtls').hidden = !sym;
+      if (sym) C.sh_axis.set(sym.a);
       $('shapeCtls').hidden = !own;
       SET_CTLS.forEach(function (c) { C['sh_' + c[0]].set(s[c[0]]); });
       $('shRefit').disabled = !(sel.edit && sel.edit.nodes);
       var n = 0, nc = 0;
       sel.nodes.forEach(function (l) { n += l.length; l.forEach(function (nd) { if (nd.c) nc++; }); });
-      $('shInfo').textContent = n + ' nodes (' + nc + ' corners)' + (sel.edit && sel.edit.nodes ? ', edited by hand' : '');
+      $('shInfo').textContent = n + ' nodes (' + nc + ' corners)' + (sel.edit && sel.edit.nodes ? ', edited by hand' : '') +
+        (sym && sym.score ? '\nHalves matched ' + Math.round(sym.score * 100) + '% before averaging' : '');
     }
   }
 
@@ -495,8 +537,10 @@
       }
       cx /= 3 * a; cy /= 3 * a;
       var loops = sh.path.map(function (l) { return TT.simplify(l, 0.02).map(function (p) { return [+(p[0] - cx).toFixed(3), +(p[1] - cy).toFixed(3)]; }); });
-      var b = shapeBox({ loops: loops });
+      var b = shapeBox({ loops: loops }), sym = sh.edit && sh.edit.sym;
       S.lib[id] = { id: id, name: base + (use.length > 1 ? ' ' + (k + 1) : ''), loops: loops, depth: depth, w: b[2] - b[0], h: b[3] - b[1] };
+      // Mirror axis (shape coordinates), used for symmetric finger notches in Layout.
+      if (sym) S.lib[id].axis = { p: [+(sym.p[0] - cx).toFixed(3), +(sym.p[1] - cy).toFixed(3)], a: sym.a };
       S.libOrder.push(id);
     });
     save(); renderLib();
@@ -517,8 +561,8 @@
   ctl('binCtls', 'wall', 'Min wall', 0, 10, 0.5, L.wall, 'mm', function (v) { L.wall = v; layoutChanged(true); });
   ctl('selCtls', 'selDepth', 'Pocket depth', 0.5, 80, 0.5, 15, 'mm', function (v) { var it = selItem(); if (it) { it.depth = v; layoutChanged(); } });
   ctl('selCtls', 'selRot', 'Rotation', -180, 180, 0.5, 0, '°', function (v) { var it = selItem(); if (it) { it.rot = v; layoutChanged(); } });
-  ctl('notchCtls', 'notchD', 'Diameter', 8, 50, 1, 22, 'mm', function () {});
-  ctl('notchCtls', 'notchDepth', 'Depth', 1, 80, 0.5, 15, 'mm', function () {});
+  ctl('notchCtls', 'notchD', 'Diameter', 8, 50, 1, 22, 'mm', function () { draw(); });
+  ctl('notchCtls', 'notchDepth', 'Depth (max: the tool’s depth)', 1, 80, 0.5, 15, 'mm', function () {});
 
   $('autoSize').onchange = function () { L.autoSize = this.checked; layoutChanged(true); };
   ['nx', 'ny'].forEach(function (id) {
@@ -537,11 +581,109 @@
   $('dup').onclick = function () {
     var it = selItem();
     if (!it) return;
-    var c = JSON.parse(JSON.stringify(it));
+    var c = JSON.parse(JSON.stringify(it)), ids = {};
     c.uid = uid(); c.x += 10; c.y += 10;
-    L.items.push(c); S.sel = c.uid; layoutChanged(true);
+    L.items.push(c);
+    // The copy gets its own copies of the tool's notches.
+    L.notches.filter(function (n) { return n.item === it.uid; }).forEach(function (n) { ids[n.id] = uid(); });
+    L.notches.filter(function (n) { return n.item === it.uid; }).forEach(function (n) {
+      L.notches.push(Object.assign({}, n, { id: ids[n.id], item: c.uid, pair: n.pair ? ids[n.pair] : null }));
+    });
+    S.sel = c.uid; layoutChanged(true);
   };
   $('del').onclick = deleteSel;
+  // Mirror axis for the selected tool's shape (used for symmetric notches).
+  $('findAxis').onclick = function () {
+    var it = selItem();
+    if (!it) return;
+    var sh = S.lib[it.shapeId], ax = TT.findAxis(sh.loops);
+    if (!ax) return;
+    sh.axis = { p: ax.p, a: ax.a };
+    save(); syncSel(); draw();
+    status('Axis found: the halves match ' + Math.round(ax.score * 100) + '%.' + (ax.score < 0.9 ? ' That’s low, so this tool may not be symmetric.' : ''));
+  };
+  $('clearAxis').onclick = function () { var it = selItem(); if (it) { delete S.lib[it.shapeId].axis; save(); syncSel(); draw(); } };
+
+  // ---------- Notches ----------
+  // A notch is {id, x, y, d, depth, item, pair}. With `item` set it belongs to that tool: x, y are
+  // in the tool's shape coordinates, so it moves, rotates and flips with the tool, and its depth
+  // never exceeds the tool's. `pair` is its mirror twin across the shape's axis.
+
+  function toWorldItem(it, p) {
+    var a = it.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a), x = it.flip ? -p[0] : p[0];
+    return [it.x + c * x - s * p[1], it.y + s * x + c * p[1]];
+  }
+  function toItem(it, p) {
+    var a = it.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a), dx = p[0] - it.x, dy = p[1] - it.y;
+    var x = c * dx + s * dy, y = -s * dx + c * dy;
+    return [it.flip ? -x : x, y];
+  }
+  function itemById(id) { return L.items.find(function (it) { return it.uid === id; }) || null; }
+
+  function notchPos(n) {
+    var it = n.item ? itemById(n.item) : null;
+    return it ? toWorldItem(it, [n.x, n.y]) : [n.x, n.y];
+  }
+  function notchDepth(n) {
+    var it = n.item ? itemById(n.item) : null;
+    return it ? Math.min(n.depth, it.depth) : n.depth;
+  }
+  // Notches in bin coordinates, for geometry.
+  function notchesWorld() {
+    return L.notches.filter(function (n) { return !n.item || itemById(n.item); }).map(function (n) {
+      var p = notchPos(n);
+      return { x: p[0], y: p[1], d: n.d, depth: notchDepth(n) };
+    });
+  }
+
+  // Where a notch would go for the mouse at p: snapped onto the nearest tool outline (within
+  // 14 screen px, unless Alt is held), plus its mirror twin if the tool has an axis.
+  function notchTarget(p, noSnap) {
+    var v = vt(), best = null, bd = 14 / v.s;
+    if (!noSnap) L.items.forEach(function (it) {
+      var l = placed(it)[0];
+      for (var i = 0; i < l.length; i++) {
+        var a = l[i], b = l[(i + 1) % l.length], dx = b[0] - a[0], dy = b[1] - a[1], ll = dx * dx + dy * dy || 1;
+        var t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / ll));
+        var q = [a[0] + t * dx, a[1] + t * dy], d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+        if (d < bd) { bd = d; best = { pos: q, item: it }; }
+      }
+    });
+    var tgt = best || { pos: p, item: null };
+    var sh = tgt.item && S.lib[tgt.item.shapeId];
+    if (sh && sh.axis && $('notchMirror').checked) {
+      var local = toItem(tgt.item, tgt.pos), m = TT.reflect(sh.axis, local);
+      if (Math.hypot(m[0] - local[0], m[1] - local[1]) > C.notchD.get() / 2) tgt.mirror = toWorldItem(tgt.item, m);
+    }
+    return tgt;
+  }
+
+  function addNotch(tgt) {
+    var d = C.notchD.get(), it = tgt.item, depth = C.notchDepth.get();
+    if (!it) { L.notches.push({ id: uid(), x: tgt.pos[0], y: tgt.pos[1], d: d, depth: depth, item: null, pair: null }); return; }
+    var a = { id: uid(), d: d, depth: depth, item: it.uid, pair: null }, lp = toItem(it, tgt.pos);
+    a.x = lp[0]; a.y = lp[1];
+    L.notches.push(a);
+    if (tgt.mirror) {
+      var mp = toItem(it, tgt.mirror), b = { id: uid(), x: mp[0], y: mp[1], d: d, depth: depth, item: it.uid, pair: a.id };
+      a.pair = b.id;
+      L.notches.push(b);
+    }
+  }
+
+  function removeNotch(n) {
+    L.notches = L.notches.filter(function (q) { return q !== n && q.id !== n.pair; });
+  }
+
+  // Move a notch to world point p (its mirror twin follows).
+  function moveNotch(n, p) {
+    var it = n.item ? itemById(n.item) : null;
+    if (!it) { n.x = p[0]; n.y = p[1]; return; }
+    var lp = toItem(it, p);
+    n.x = lp[0]; n.y = lp[1];
+    var twin = n.pair && L.notches.find(function (q) { return q.id === n.pair; }), sh = S.lib[it.shapeId];
+    if (twin && sh.axis) { var m = TT.reflect(sh.axis, lp); twin.x = m[0]; twin.y = m[1]; }
+  }
 
   function syncLayoutInputs() {
     $('nx').value = L.nx; $('ny').value = L.ny; $('autoSize').checked = L.autoSize;
@@ -568,6 +710,7 @@
   function layoutForGeometry() {
     var c = Object.assign({}, L);
     c.items = L.items.map(function (it) { return Object.assign({}, it, { shapeId: it.uid, rot: it.rot, flip: false }); });
+    c.notches = notchesWorld();
     return c;
   }
 
@@ -575,7 +718,9 @@
 
   function deleteSel() {
     if (!S.sel) return;
-    L.items = L.items.filter(function (it) { return it.uid !== S.sel; });
+    var gone = S.sel;
+    L.items = L.items.filter(function (it) { return it.uid !== gone; });
+    L.notches = L.notches.filter(function (n) { return n.item !== gone; });
     S.sel = null; layoutChanged(true);
   }
 
@@ -585,7 +730,7 @@
     if (!b) return;
     var dx = TT.binSize(L.nx) / 2 - (b[0] + b[2]) / 2, dy = TT.binSize(L.ny) / 2 - (b[1] + b[3]) / 2;
     L.items.forEach(function (it) { it.x += dx; it.y += dy; });
-    L.notches.forEach(function (n) { n.x += dx; n.y += dy; });
+    L.notches.forEach(function (n) { if (!n.item) { n.x += dx; n.y += dy; } }); // tool notches move with the tool
   }
 
   // After an edit: refit the bin (if automatic), invalidate the model, save, redraw.
@@ -610,6 +755,10 @@
     if (!it) return;
     $('selName').textContent = S.lib[it.shapeId].name;
     C.selDepth.set(it.depth); C.selRot.set(+it.rot.toFixed(1));
+    var ax = S.lib[it.shapeId].axis;
+    $('axisInfo').textContent = ax ? 'Has a symmetry axis (pink): notches placed on it get a mirrored twin.' : 'No symmetry axis.';
+    $('clearAxis').hidden = !ax;
+    $('findAxis').textContent = ax ? 'Find axis again' : 'Add symmetry axis';
   }
 
   // Warnings about tools too close to the bin edge.
@@ -685,9 +834,9 @@
     if (!L.items.length && !L.notches.length) { $('genInfo').textContent = 'Place some tools in Layout first.'; return; }
     work('Building model…', function () {
       var t0 = performance.now();
-      if (L.autoUnits) { L.units = TT.autoHeight(L); $('units').value = L.units; }
-      var top = L.units * G.unitH, floor = top - TT.maxDepth(L) - G.baseH;
       var GL = layoutForGeometry(), lib = libForGeometry();
+      if (L.autoUnits) { L.units = GL.units = TT.autoHeight(GL); $('units').value = L.units; }
+      var top = L.units * G.unitH, floor = top - TT.maxDepth(GL) - G.baseH;
       var fields = TT.pocketFields(GL, lib), pieces = TT.pieces(L), problems = [], tris = 0;
       var meshes = pieces.map(function (pc, k) {
         var m = TT.pieceMesh(GL, fields, pc), open = 0, inverted = 0;
@@ -860,6 +1009,7 @@
         sh.nodes.forEach(function (l) { l.forEach(function (nd) { if (nd.c) { ctx.beginPath(); ctx.arc(nd.x, nd.y, 2.5 / v.s, 0, 7); ctx.fill(); } }); });
       }
     });
+    if (S.cSel && S.cSel.edit && S.cSel.edit.sym) drawAxis(S.cSel.edit.sym, S.cSel.box, v);
     if (S.cSel) {
       var hs = 4.5 / v.s;
       S.cSel.nodes.forEach(function (l, li) {
@@ -902,6 +1052,15 @@
       ctx.beginPath(); ctx.arc(S.mouse[0], S.mouse[1], r, 0, 7); ctx.stroke();
     }
     drawRuler();
+  }
+
+  // Dashed mirror axis across a box (world units, current transform).
+  function drawAxis(ax, box, v) {
+    var a = ax.a * Math.PI / 180, ux = Math.cos(a), uy = Math.sin(a), L = Math.hypot(box[2] - box[0], box[3] - box[1]) * 0.6 + 10;
+    ctx.save();
+    ctx.strokeStyle = '#d6336c'; ctx.lineWidth = 1.5 / v.s; ctx.setLineDash([8 / v.s, 5 / v.s]);
+    ctx.beginPath(); ctx.moveTo(ax.p[0] - ux * L, ax.p[1] - uy * L); ctx.lineTo(ax.p[0] + ux * L, ax.p[1] + uy * L); ctx.stroke();
+    ctx.restore();
   }
 
   function drawRuler() {
@@ -951,10 +1110,29 @@
       ctx.strokeStyle = it.uid === S.sel ? '#1c7ed6' : 'rgba(0,0,0,0.55)'; ctx.lineWidth = (it.uid === S.sel ? 2.5 : 1) / v.s; ctx.stroke();
     });
     L.notches.forEach(function (n) {
-      ctx.beginPath(); ctx.arc(n.x, n.y, n.d / 2, 0, 7);
-      ctx.fillStyle = depthColour(n.depth, 0.6); ctx.fill();
+      if (n.item && !itemById(n.item)) return;
+      var q = notchPos(n);
+      ctx.beginPath(); ctx.arc(q[0], q[1], n.d / 2, 0, 7);
+      ctx.fillStyle = depthColour(notchDepth(n), 0.6); ctx.fill();
       ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1 / v.s; ctx.stroke();
     });
+    // Symmetry axes of tools that have one (pink, dashed).
+    L.items.forEach(function (it2) {
+      var ax = S.lib[it2.shapeId] && S.lib[it2.shapeId].axis;
+      if (!ax || (it2.uid !== S.sel && S.layTool !== 'notch')) return;
+      var p0 = toWorldItem(it2, ax.p), p1 = toWorldItem(it2, [ax.p[0] + Math.cos(ax.a * Math.PI / 180), ax.p[1] + Math.sin(ax.a * Math.PI / 180)]);
+      var lp = placed(it2)[0], bb = [Infinity, Infinity, -Infinity, -Infinity];
+      lp.forEach(function (p) { bb[0] = Math.min(bb[0], p[0]); bb[1] = Math.min(bb[1], p[1]); bb[2] = Math.max(bb[2], p[0]); bb[3] = Math.max(bb[3], p[1]); });
+      drawAxis({ p: p0, a: Math.atan2(p1[1] - p0[1], p1[0] - p0[0]) * 180 / Math.PI }, bb, v);
+    });
+    // Notch preview: where a click would put it (and its mirror twin).
+    if (S.layTool === 'notch' && S.notchPrev) {
+      var np = S.notchPrev, r = C.notchD.get() / 2;
+      ctx.save(); ctx.setLineDash([4 / v.s, 3 / v.s]); ctx.lineWidth = 1.5 / v.s;
+      ctx.strokeStyle = np.item ? '#1c7ed6' : '#666'; ctx.fillStyle = 'rgba(28,126,214,0.15)';
+      [np.pos].concat(np.mirror ? [np.mirror] : []).forEach(function (q) { ctx.beginPath(); ctx.arc(q[0], q[1], r, 0, 7); ctx.fill(); ctx.stroke(); });
+      ctx.restore();
+    }
     ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5 / v.s;
     ctx.beginPath();
     pcs.forEach(function (pc) { roundRectPath(pc.ix * G.pitch, pc.iy * G.pitch, TT.binSize(pc.kx), TT.binSize(pc.ky), G.radius); });
@@ -999,7 +1177,12 @@
   }
 
   function hitNotch(p) {
-    for (var k = L.notches.length - 1; k >= 0; k--) if (Math.hypot(L.notches[k].x - p[0], L.notches[k].y - p[1]) <= L.notches[k].d / 2) return L.notches[k];
+    for (var k = L.notches.length - 1; k >= 0; k--) {
+      var n = L.notches[k];
+      if (n.item && !itemById(n.item)) continue;
+      var q = notchPos(n);
+      if (Math.hypot(q[0] - p[0], q[1] - p[1]) <= n.d / 2) return n;
+    }
     return null;
   }
 
@@ -1053,14 +1236,14 @@
         return;
       }
       // Brush size is in screen pixels (like LaserEngraver), stored as mm.
-      S.stroke = { mode: S.capTool, r: +(S.brush / 2 / v.s).toFixed(3), pts: [p], tol: C.smartTol.get(), reach: C.smartReach.get() };
+      S.stroke = { mode: S.capTool, r: +(S.brush / 2 / v.s).toFixed(3), pts: [p] };
       S.drag = { stroke: true, sx: e.clientX, sy: e.clientY };
       draw();
     } else if (S.phase === 'layout') {
       if (S.layTool === 'notch') {
         var hn = hitNotch(p);
-        if (hn) L.notches.splice(L.notches.indexOf(hn), 1);
-        else L.notches.push({ x: p[0], y: p[1], d: C.notchD.get(), depth: C.notchDepth.get() });
+        if (hn) removeNotch(hn); else addNotch(notchTarget(p, e.altKey));
+        S.notchPrev = null;
         layoutChanged(false);
         return;
       }
@@ -1085,7 +1268,15 @@
   cv.addEventListener('pointermove', function (e) {
     var d = S.drag, rect = cv.getBoundingClientRect();
     S.mouse = [e.clientX - rect.left, e.clientY - rect.top];
-    if (!d) { if (S.phase === 'capture' && S.capView === 'trace' && STROKE_COLORS[S.capTool]) draw(); return; }
+    if (!d) {
+      if (S.phase === 'capture' && S.capView === 'trace' && STROKE_COLORS[S.capTool]) draw();
+      if (S.phase === 'layout' && S.layTool === 'notch') {
+        var wp2 = toWorld(e);
+        S.notchPrev = hitNotch(wp2) ? null : notchTarget(wp2, e.altKey);
+        draw();
+      }
+      return;
+    }
     if (d.pan) { var v = vt(); v.x = d.vx + e.clientX - d.sx; v.y = d.vy + e.clientY - d.sy; draw(); return; }
     if (d.orbit) {
       S.preview.yaw = d.yaw + (e.clientX - d.sx) * 0.01;
@@ -1110,7 +1301,9 @@
       d.rotate.rot = ((r + 540) % 360) - 180;
       C.selRot.set(d.rotate.rot); draw();
     } else if (d.move) {
-      d.move.x += p[0] - d.last[0]; d.move.y += p[1] - d.last[1]; d.last = p; d.moved = true; draw();
+      if (d.move.uid) { d.move.x += p[0] - d.last[0]; d.move.y += p[1] - d.last[1]; }
+      else { var np = notchPos(d.move); moveNotch(d.move, [np[0] + p[0] - d.last[0], np[1] + p[1] - d.last[1]]); }
+      d.last = p; d.moved = true; draw();
     }
   });
 
@@ -1118,7 +1311,11 @@
     var d = S.drag;
     S.drag = null;
     if (!d) return;
-    if (d.node) { renderShapeList(); draw(); }
+    if (d.node) {
+      var dsh = S.cSel, dn = dsh.nodes[d.node.loop][d.node.k];
+      if (d.moved && axisSide(dsh, [dn.x, dn.y])) { nodesEdited(dsh, axisSide(dsh, [dn.x, dn.y])); S.selNode = null; }
+      renderShapeList(); draw();
+    }
     else if (d.corner !== undefined) { if (S.refMode === 'grid') fitGrid(); runFrom('warp'); }
     else if (d.stroke) { capEdit(); S.strokes.push(S.stroke); S.stroke = null; runFrom('edit'); toolbar(); }
     else if (d.rotate || (d.move && d.moved)) layoutChanged(true);
@@ -1149,8 +1346,11 @@
     if (!sh || !sn) return;
     capEdit();
     sh.nodes = JSON.parse(JSON.stringify(sh.nodes));
+    var nd = sh.nodes[sn.loop][sn.k], side = axisSide(sh, [nd.x, nd.y]);
     fn(sh.nodes[sn.loop], sn.k);
-    nodesEdited(sh); renderShapeList(); draw();
+    nodesEdited(sh, side);
+    if (side) S.selNode = null; // node order changes when the other half is rebuilt
+    renderShapeList(); draw();
   }
   function toggleCorner() { editNode(function (l, k) { l[k].c = !l[k].c; }); }
   function toggleStraight() { editNode(function (l, k) { l[k].s = !l[k].s; }); }
@@ -1262,6 +1462,7 @@
       }
       else if (k === 'x' && S.cSel) toggleOff(S.cSel);
       else if ((e.key === 'Delete' || e.key === 'Backspace') && S.selNode) { e.preventDefault(); deleteNode(); }
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && S.cSel) { e.preventDefault(); toggleOff(S.cSel); }
       else if (k === 'c' && S.selNode) toggleCorner();
       else if (k === 'l' && S.selNode) toggleStraight();
       else if (e.key === '[' || e.key === ']') {

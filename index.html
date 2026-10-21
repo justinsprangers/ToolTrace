@@ -8,6 +8,9 @@
   :root { --bg: #f2f2ef; --panel: #fff; --ink: #1f1f1f; --mute: #6b6b6b; --line: #dcdcd8; --accent: #e8590c; --accent-soft: #fdeee6; --warn: #b42318; --ok: #2b8a3e; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, -apple-system, Segoe UI, sans-serif; }
+  /* The page itself never scrolls: header on top, the side panel scrolls on its own. */
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  header { flex: none; }
   button, input, select { font: inherit; }
   header { display: flex; align-items: center; gap: 14px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
   header h1 { font-size: 17px; margin: 0; }
@@ -17,8 +20,8 @@
   .phases button b { display: inline-block; width: 18px; height: 18px; line-height: 18px; border-radius: 50%; background: rgba(0,0,0,.08); font-size: 12px; text-align: center; margin-right: 6px; }
   .phases button.on b { background: rgba(255,255,255,.2); }
   header .spacer { flex: 1; }
-  main { display: grid; grid-template-columns: 370px 1fr; height: calc(100% - 51px); }
-  aside { overflow-y: auto; border-right: 1px solid var(--line); background: var(--panel); padding: 4px 16px 40px; }
+  main { display: grid; grid-template-columns: 370px 1fr; flex: 1; min-height: 0; }
+  aside { overflow-y: auto; min-height: 0; border-right: 1px solid var(--line); background: var(--panel); padding: 4px 16px 40px; }
   .panel[hidden] { display: none; }
   section { border-bottom: 1px solid var(--line); padding: 10px 0 12px; }
   section:last-child { border-bottom: 0; }
@@ -57,12 +60,12 @@
   .libitem input:hover, .libitem input:focus { border-color: #ccc; }
   .libitem small { color: var(--mute); padding-left: 4px; }
   .libitem button { border: 1px solid #ccc; background: #fafafa; border-radius: 4px; cursor: pointer; padding: 3px 8px; }
-  #view { position: relative; display: flex; flex-direction: column; min-width: 0; }
+  #view { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
   #toolbar { display: flex; gap: 6px; padding: 8px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--line); background: #fbfbfa; }
   #toolbar .seg { margin: 0; }
   #toolbar .seg button { padding: 4px 10px; white-space: nowrap; }
   #toolbar .sep { width: 1px; height: 22px; background: var(--line); }
-  #cv { flex: 1; width: 100%; min-height: 0; touch-action: none; display: block; outline: none; }
+  #cv { flex: 1 1 0; width: 100%; height: 0; min-height: 0; touch-action: none; display: block; outline: none; }
   #status { padding: 6px 12px; font-size: 13px; color: var(--mute); border-top: 1px solid var(--line); background: var(--panel); min-height: 31px; }
   #status.warn { color: var(--warn); }
   #busy { position: absolute; top: 56px; right: 12px; background: rgba(0,0,0,.75); color: #fff; padding: 4px 10px; border-radius: 12px; font-size: 12px; }
@@ -90,6 +93,7 @@
   dialog td:first-child { width: 150px; }
   kbd { font: 12px ui-monospace, Consolas, monospace; background: #f3f3f1; border: 1px solid #ccc; border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
   @media (max-width: 820px) {
+    body { display: block; overflow: auto; }
     main { grid-template-columns: 1fr; grid-template-rows: auto 75vh; height: auto; }
     aside { border-right: 0; }
     #view { height: 75vh; }
@@ -158,8 +162,7 @@
     </section>
     <section>
       <h2>Fix up</h2>
-      <p class="hint">Tools above the Trace view: <b>Smart keep</b> (K) paints over a missed part and spreads to the same colour; <b>Smart remove</b> (R) does the same for a wrong area, e.g. the mat between snip handles. Smart keep only adds and smart remove only removes. <b>Brush keep / erase</b> (B / E) change exactly what you paint. [ and ] change the brush size; Ctrl+Z undoes. <b>Select</b> (V) is for shapes and nodes, below.</p>
-      <div id="brushCtl"></div>
+      <p class="hint">Tools above the Trace view: <b>Brush keep / erase</b> (B / E) add or remove exactly what you paint, e.g. the mat between snip handles. [ and ] change the brush size; Ctrl+Z undoes. <b>Select</b> (V) is for shapes and nodes, below.</p>
     </section>
     <section>
       <h2>Shapes</h2>
@@ -172,12 +175,16 @@
     </section>
     <section id="shapeSel" hidden>
       <h2 id="shTitle">Shape</h2>
-      <label class="check"><input type="checkbox" id="shOff"> Include this shape</label>
+      <div class="btns"><button class="b" id="shDel">Exclude shape (Del)</button><button class="b" id="shRefit" title="Throw away hand edits and fit the nodes again">Re-fit nodes</button></div>
+      <label class="check"><input type="checkbox" id="shSym"> Symmetric</label>
+      <div id="symCtls" hidden>
+        <p class="hint">The two halves are averaged across the pink axis and the nodes mirrored, so the outline is exactly symmetric. Editing a node mirrors it to the other side when you let go.</p>
+        <div class="btns"><button class="b" id="shFindAxis">Find axis again</button></div>
+      </div>
       <label class="check"><input type="checkbox" id="shOwn"> Own outline settings</label>
       <div id="shapeCtls" hidden></div>
-      <div class="btns"><button class="b" id="shRefit" title="Throw away hand edits and fit the nodes again">Re-fit nodes</button></div>
       <div class="info" id="shInfo"></div>
-      <p class="hint"><b>Nodes:</b> drag to move. Click the outline to add a node. Double-click a node (or <kbd>C</kbd>) to switch corner ■ / smooth ●. <kbd>L</kbd> makes the segment after the selected node a straight line. <kbd>Delete</kbd> removes it. <kbd>X</kbd> includes / leaves out the shape. <kbd>Esc</kbd> deselects.</p>
+      <p class="hint"><b>Nodes:</b> drag to move. Click the outline to add a node. Double-click a node (or <kbd>C</kbd>) to switch corner ■ / smooth ●. <kbd>L</kbd> makes the segment after the selected node a straight line. <kbd>Delete</kbd> removes the selected node, or excludes the shape if no node is selected. <kbd>Esc</kbd> deselects.</p>
     </section>
     <section>
       <h2>Save outlines</h2>
@@ -219,12 +226,15 @@
         <button class="b" id="rotL">⟲ 90°</button><button class="b" id="rotR">⟳ 90°</button><button class="b" id="rotAuto">Straighten</button><button class="b" id="flip">Flip</button>
       </div>
       <div class="btns"><button class="b" id="dup">Duplicate</button><button class="b" id="del">Remove</button></div>
+      <div class="hint" id="axisInfo"></div>
+      <div class="btns"><button class="b" id="findAxis">Add symmetry axis</button><button class="b" id="clearAxis" hidden>Remove axis</button></div>
       <p class="hint">Drag to move, drag the round handle to rotate (hold Shift to snap 15°). Arrow keys nudge, R rotates, Delete removes.</p>
     </section>
     <section>
       <h2>Finger notches</h2>
       <div id="notchCtls"></div>
-      <p class="hint">Pick “Notch” above the picture, then click to add one. Click a notch again to remove it. Notches can be dragged in Select mode.</p>
+      <label class="check"><input type="checkbox" id="notchMirror" checked> Mirror across the tool’s symmetry axis</label>
+      <p class="hint">Pick <b>Notch</b> (N) above the picture. A dashed circle shows where it will go. Near a tool it snaps onto the outline (hold Alt to place freely), belongs to that tool (moves and rotates with it), and is never deeper than the tool. If the tool has a symmetry axis, a mirrored twin is added. Click a notch to remove it (and its twin); drag notches in Select mode.</p>
     </section>
     <div id="layoutInfo" class="info"></div>
   </div>
@@ -269,14 +279,11 @@
   <table>
     <tr><td><kbd>1</kbd> / <kbd>2</kbd></td><td>Photo view / Trace view</td></tr>
     <tr><td><kbd>V</kbd></td><td>Select shapes and nodes</td></tr>
-    <tr><td><kbd>X</kbd></td><td>Include / leave out the selected shape</td></tr>
+    <tr><td><kbd>Delete</kbd> or <kbd>X</kbd></td><td>Exclude / include the selected shape (Delete removes the selected node instead, if one is selected)</td></tr>
     <tr><td>Drag a node / click the outline</td><td>Move a node / add a node</td></tr>
     <tr><td><kbd>C</kbd> or double-click a node</td><td>Switch node between corner and smooth</td></tr>
     <tr><td><kbd>L</kbd></td><td>Straight line from the selected node to the next</td></tr>
-    <tr><td><kbd>Delete</kbd></td><td>Delete the selected node</td></tr>
     <tr><td><kbd>Esc</kbd></td><td>Deselect node, then shape, then Pan tool</td></tr>
-    <tr><td><kbd>K</kbd></td><td>Smart keep</td></tr>
-    <tr><td><kbd>R</kbd></td><td>Smart remove</td></tr>
     <tr><td><kbd>B</kbd> / <kbd>E</kbd></td><td>Brush keep / brush erase</td></tr>
     <tr><td><kbd>P</kbd></td><td>Pan tool</td></tr>
     <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Smaller / bigger brush</td></tr>

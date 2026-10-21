@@ -377,64 +377,6 @@ var TT = window.TT = window.TT || {};
     dab(pts[pts.length - 1][0], pts[pts.length - 1][1]);
   };
 
-  // ---------- Smart keep / remove ----------
-
-  // CIELAB colour of every warped pixel (for colour-distance comparisons). Cache per warp.
-  TT.labImage = function (wp) {
-    var n = wp.w * wp.h, d = wp.data, lab = new Float32Array(n * 3);
-    function lin(c) { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
-    function fn(t) { return t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116; }
-    var lut = new Float32Array(256);
-    for (var v = 0; v < 256; v++) lut[v] = lin(v);
-    for (var k = 0; k < n; k++) {
-      var r = lut[d[k * 4]], g = lut[d[k * 4 + 1]], b = lut[d[k * 4 + 2]];
-      var X = fn((0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047), Y = fn(0.2126 * r + 0.7152 * g + 0.0722 * b);
-      var Z = fn((0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883);
-      lab[k * 3] = 116 * Y - 16; lab[k * 3 + 1] = 500 * (X - Y); lab[k * 3 + 2] = 200 * (Y - Z);
-    }
-    return lab;
-  };
-
-  // Smart stroke (same idea as LaserEngraver's): the area under the brush, spread over connected
-  // pixels whose colour is within `tol` (ΔE) of a colour under the brush, no further than `reach`
-  // mm from the stroke. Keep strokes only add to the mask, remove strokes only take away.
-  TT.smartStroke = function (mask, wp, lab, st, tol, reach) {
-    var w = wp.w, h = wp.h, seed = new Uint8Array(w * h);
-    TT.paint(seed, wp, st.pts, st.r, 1);
-    var samples = [], seen = {}, queue = [], i;
-    for (i = 0; i < w * h; i++) {
-      if (!seed[i]) continue;
-      queue.push(i);
-      var L = lab[i * 3], A = lab[i * 3 + 1], B = lab[i * 3 + 2], key = Math.round(L / 3) + ',' + Math.round(A / 3) + ',' + Math.round(B / 3);
-      if (!seen[key]) { seen[key] = 1; samples.push([L, A, B]); }
-    }
-    if (samples.length > 96) { // keep an even spread of the colours seen
-      var step = samples.length / 96, sub = [];
-      for (i = 0; i < 96; i++) sub.push(samples[Math.floor(i * step)]);
-      samples = sub;
-    }
-    var near = TT.edt(seed, w, h, 1), reachPx2 = (reach / wp.res) * (reach / wp.res), tol2 = tol * tol;
-    var region = seed.slice();
-    function similar(k) {
-      var L = lab[k * 3], A = lab[k * 3 + 1], B = lab[k * 3 + 2];
-      for (var s = 0; s < samples.length; s++) {
-        var dl = L - samples[s][0], da = A - samples[s][1], db = B - samples[s][2];
-        if (dl * dl + da * da + db * db <= tol2) return true;
-      }
-      return false;
-    }
-    for (var q = 0; q < queue.length; q++) {
-      var p = queue[q], x = p % w, nb = [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, p >= w ? p - w : -1, p < w * (h - 1) ? p + w : -1];
-      for (var t = 0; t < 4; t++) {
-        var k = nb[t];
-        if (k < 0 || region[k] || near[k] > reachPx2 || !similar(k)) continue;
-        region[k] = 1; queue.push(k);
-      }
-    }
-    var val = st.mode === 'keep' ? 1 : 0;
-    for (i = 0; i < w * h; i++) if (region[i]) mask[i] = val;
-  };
-
   // ---------- Contours and outlines ----------
 
   // Marching squares on grid values f (w x h). Region f < 0 is "inside". Returns closed loops in
@@ -731,6 +673,123 @@ var TT = window.TT = window.TT || {};
     }
     return best || [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
   }
+
+  // ---------- Symmetry ----------
+
+  // Rasterise loops (even-odd) on a grid: pixel (i, j) centre = (x0 + (i + 0.5) g, y0 + (j + 0.5) g).
+  function rasterLoops(loops, x0, y0, w, h, g) {
+    var c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    var ctx = c.getContext('2d');
+    ctx.setTransform(1 / g, 0, 0, 1 / g, -x0 / g, -y0 / g);
+    ctx.beginPath();
+    loops.forEach(function (l) { l.forEach(function (p, i) { ctx[i ? 'lineTo' : 'moveTo'](p[0], p[1]); }); ctx.closePath(); });
+    ctx.fill('evenodd');
+    var px = ctx.getImageData(0, 0, w, h).data, m = new Uint8Array(w * h);
+    for (var i = 0; i < w * h; i++) m[i] = px[i * 4 + 3] >= 128 ? 1 : 0;
+    return m;
+  }
+
+  function loopsBox(loops) {
+    var b = [Infinity, Infinity, -Infinity, -Infinity];
+    loops.forEach(function (l) { l.forEach(function (p) { b[0] = Math.min(b[0], p[0]); b[1] = Math.min(b[1], p[1]); b[2] = Math.max(b[2], p[0]); b[3] = Math.max(b[3], p[1]); }); });
+    return b;
+  }
+
+  // Reflect p across the line through axis.p at angle axis.a (degrees, y down).
+  TT.reflect = function (axis, p) {
+    var a = axis.a * Math.PI / 180, nx = -Math.sin(a), ny = Math.cos(a);
+    var d = (p[0] - axis.p[0]) * nx + (p[1] - axis.p[1]) * ny;
+    return [p[0] - 2 * d * nx, p[1] - 2 * d * ny];
+  };
+
+  // Best mirror axis of a shape: the line whose reflection of the shape overlaps it most.
+  // Returns {p, a (deg), score (0..1, fraction of the shape that lands on itself)}.
+  TT.findAxis = function (loops) {
+    var b = loopsBox(loops), g = Math.max(0.4, Math.max(b[2] - b[0], b[3] - b[1]) / 400), x0 = b[0] - 2, y0 = b[1] - 2;
+    var w = Math.ceil((b[2] - b[0] + 4) / g), h = Math.ceil((b[3] - b[1] + 4) / g), m = rasterLoops(loops, x0, y0, w, h, g);
+    var pts = [], cx = 0, cy = 0, i;
+    for (i = 0; i < w * h; i++) if (m[i]) { var x = x0 + (i % w + 0.5) * g, y = y0 + (Math.floor(i / w) + 0.5) * g; pts.push(x, y); cx += x; cy += y; }
+    var n = pts.length / 2;
+    if (!n) return null;
+    cx /= n; cy /= n;
+    var stride = Math.max(1, Math.floor(n / 20000));
+    function score(a, off) {
+      var r = a * Math.PI / 180, nx = -Math.sin(r), ny = Math.cos(r), px = cx + off * nx, py = cy + off * ny, hit = 0, tot = 0;
+      for (var k = 0; k < n; k += stride) {
+        var qx = pts[2 * k], qy = pts[2 * k + 1], d = (qx - px) * nx + (qy - py) * ny;
+        var ix = Math.floor((qx - 2 * d * nx - x0) / g), iy = Math.floor((qy - 2 * d * ny - y0) / g);
+        if (ix >= 0 && iy >= 0 && ix < w && iy < h && m[iy * w + ix]) hit++;
+        tot++;
+      }
+      return hit / tot;
+    }
+    var best = { a: 0, off: 0, s: -1 };
+    for (var a = 0; a < 180; a += 2) { var s = score(a, 0); if (s > best.s) best = { a: a, off: 0, s: s }; }
+    var a0 = best.a;
+    for (var da = -2; da <= 2; da += 0.25) for (var o = -4; o <= 4; o += 0.5) {
+      var s2 = score(a0 + da, o); if (s2 > best.s) best = { a: a0 + da, off: o, s: s2 };
+    }
+    var b0 = best;
+    for (var o2 = b0.off - 0.5; o2 <= b0.off + 0.5; o2 += 0.1) { var s3 = score(b0.a, o2); if (s3 > best.s) best = { a: b0.a, off: o2, s: s3 }; }
+    var r = best.a * Math.PI / 180;
+    return { p: [+(cx - best.off * Math.sin(r)).toFixed(3), +(cy + best.off * Math.cos(r)).toFixed(3)], a: +(((best.a % 180) + 180) % 180).toFixed(2), score: best.s };
+  };
+
+  // Make a shape exactly symmetric about an axis by averaging it with its mirror image (mean of
+  // the two signed distance fields), so small differences between the halves (photo angle,
+  // tracing noise) even out instead of one side being copied.
+  TT.symmetrize = function (loops, axis) {
+    var all = loops.concat(loops.map(function (l) { return l.map(function (p) { return TT.reflect(axis, p); }); }));
+    var b = loopsBox(all), g = 0.2, x0 = b[0] - 3, y0 = b[1] - 3;
+    var w = Math.ceil((b[2] - b[0] + 6) / g), h = Math.ceil((b[3] - b[1] + 6) / g);
+    var m = rasterLoops(loops, x0, y0, w, h, g), sd = TT.sdf(m, w, h), f = new Float32Array(w * h);
+    function at(x, y) {
+      var fx = (x - x0) / g - 0.5, fy = (y - y0) / g - 0.5;
+      if (fx < 0 || fy < 0 || fx >= w - 1 || fy >= h - 1) return 50;
+      var i = fx | 0, j = fy | 0, tx = fx - i, ty = fy - j, k = j * w + i;
+      return (sd[k] * (1 - tx) + sd[k + 1] * tx) * (1 - ty) + (sd[k + w] * (1 - tx) + sd[k + w + 1] * tx) * ty;
+    }
+    for (var j = 0; j < h; j++) for (var i = 0; i < w; i++) {
+      var x = x0 + (i + 0.5) * g, y = y0 + (j + 0.5) * g, q = TT.reflect(axis, [x, y]);
+      f[j * w + i] = (i === 0 || j === 0 || i === w - 1 || j === h - 1) ? 50 : 0.5 * (sd[j * w + i] + at(q[0], q[1]));
+    }
+    var out = TT.contours(f, w, h).map(function (l) {
+      return l.map(function (p) { return [x0 + (p[0] + 0.5) * g, y0 + (p[1] + 0.5) * g]; });
+    }).filter(function (l) { return Math.abs(TT.loopArea(l)) > 4; });
+    var outers = out.filter(function (l) { return TT.loopArea(l) < 0; }).sort(function (p, q) { return TT.loopArea(p) - TT.loopArea(q); });
+    if (!outers.length) return loops;
+    var outer = outers[0];
+    return [outer].concat(out.filter(function (l) { return TT.loopArea(l) > 0 && TT.pointInLoop(l[0], outer); }));
+  };
+
+  // Make a node loop exactly symmetric: keep the nodes on one side of the axis (nodes within
+  // 0.3 mm of it are moved onto it) and replace the other side by their mirror images. Returns
+  // the nodes unchanged if the loop crosses the axis more than twice.
+  TT.mirrorNodes = function (nodes, axis, side) {
+    var a = axis.a * Math.PI / 180, nx = -Math.sin(a), ny = Math.cos(a), n = nodes.length, sg = side < 0 ? -1 : 1;
+    var d = nodes.map(function (nd) { var v = sg * ((nd.x - axis.p[0]) * nx + (nd.y - axis.p[1]) * ny); return Math.abs(v) < 0.3 ? 0 : v; });
+    var sideA = function (i) { return d[i] >= 0; }, start = -1, i;
+    for (i = 0; i < n; i++) if (sideA(i) && !sideA((i - 1 + n) % n)) { if (start >= 0) return nodes; start = i; }
+    if (start < 0) return nodes;
+    var run = [];
+    for (i = 0; i < n && sideA((start + i) % n); i++) {
+      var nd = nodes[(start + i) % n], on = d[(start + i) % n] === 0;
+      var proj = on ? (nd.x - axis.p[0]) * nx + (nd.y - axis.p[1]) * ny : 0; // moves near-axis nodes onto it
+      run.push({ x: nd.x - proj * nx, y: nd.y - proj * ny, c: nd.c, s: nd.s, on: on });
+    }
+    if (run.length < 2) return nodes;
+    var first = run[0], last = run[run.length - 1];
+    if (last.on && run.length > 1) last.s = run[run.length - 2].s;
+    if (!last.on) last.s = false;
+    var out = run.map(function (r) { return { x: +r.x.toFixed(3), y: +r.y.toFixed(3), c: r.c, s: r.s }; });
+    for (i = run.length - 1; i >= 0; i--) {
+      if ((i === run.length - 1 && last.on) || (i === 0 && first.on)) continue;
+      var m = TT.reflect(axis, [run[i].x, run[i].y]);
+      out.push({ x: +m[0].toFixed(3), y: +m[1].toFixed(3), c: run[i].c, s: i > 0 ? run[i - 1].s : false });
+    }
+    return out;
+  };
 
   // ---------- Node paths ----------
   // An outline is a closed list of nodes {x, y, c, s}: c = true for a corner (sharp), false for a
