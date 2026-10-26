@@ -145,6 +145,7 @@
     <button data-phase="capture" class="on"><b>1</b>Capture</button>
     <button data-phase="layout"><b>2</b>Layout</button>
     <button data-phase="generate"><b>3</b>Generate</button>
+    <button data-phase="baseplate" title="Ultralight Gridfinity baseplate for a drawer or shelf (separate from the bin steps)"><b>▦</b>Baseplate</button>
   </div>
   <div class="spacer"></div>
   <button class="b" id="tourBtn" title="A guided walk-through of the whole tool">Tutorial</button>
@@ -349,6 +350,38 @@
       </details>
     </details>
   </div>
+
+  <!-- Baseplate: an ultralight Gridfinity grid for an area, split into printable pieces -->
+  <div class="panel" id="panel-baseplate" hidden>
+    <details class="sec" open data-key="bpArea"><summary>Area to fill</summary>
+      <div class="field"><label>Width × depth</label><input type="number" id="bpW" min="1" step="any"><input type="number" id="bpD" min="1" step="any">
+        <select id="bpUnit" style="flex:0 0 58px"><option value="1">mm</option><option value="25.4">in</option></select></div>
+      <div class="seg" id="bpFill">
+        <button data-mode="pad">Pad edges to fill</button>
+        <button data-mode="gap">Leave gap</button>
+      </div>
+      <div id="bpAreaCtls"></div>
+      <ul class="tips"><li>Only whole 42 mm cells. The grid is centred; padding (or the gap) takes the rest.</li></ul>
+    </details>
+    <details class="sec" open data-key="bpPrint"><summary>Printing</summary>
+      <div id="bpPrintCtls"></div>
+      <div class="btns"><button class="b" data-reset="bpPrintCtls">Restore defaults</button></div>
+      <ul class="tips"><li>Max print size: A1 mini 180 mm; A1, P1S, X1C 256 mm.</li><li>Every piece is at least <b>Min connected rows</b> cells in both directions when it fits.</li></ul>
+    </details>
+    <details class="sec" open data-key="bpOut"><summary>Pieces</summary>
+      <div id="bpInfo" class="info"></div>
+      <div class="downloads" id="bpDownloads"></div>
+      <details class="more"><summary>Print settings and notes</summary>
+        <ul>
+          <li>0.4 nozzle: 3 walls, 0.28 mm layers, 0% infill, Arachne walls.</li>
+          <li>0.8 nozzle: 1 wall, 0.32 mm layers (fastest).</li>
+          <li>Bambu Studio may warn about “floating regions”; that's the open underside and is fine.</li>
+          <li>Walls only, no floor or bottom lip; holes where cells meet. Bins fit as on any Gridfinity baseplate.</li>
+          <li>Padding is a skeleton frame: an outer wall tied to the grid by ribs on each grid line.</li>
+        </ul>
+      </details>
+    </details>
+  </div>
 </aside>
 <div id="view">
   <div id="toolbar"></div>
@@ -401,6 +434,7 @@
 <script src="js/vision.js"></script>
 <script src="js/grid.js"></script>
 <script src="js/gridfinity.js"></script>
+<script src="js/baseplate.js"></script>
 <script src="js/preview3d.js"></script>
 <script src="js/app.js"></script>
 <script src="js/tour.js"></script>

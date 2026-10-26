@@ -142,11 +142,16 @@
   function setPhase(p) {
     S.phase = p;
     document.querySelectorAll('.phases button').forEach(function (b) { b.classList.toggle('on', b.dataset.phase === p); });
-    ['capture', 'layout', 'generate'].forEach(function (k) { $('panel-' + k).hidden = k !== p; });
+    ['capture', 'layout', 'generate', 'baseplate'].forEach(function (k) { $('panel-' + k).hidden = k !== p; });
     if (p === 'layout') renderLib();
     if (p === 'generate' && !S.gen) $('genInfo').textContent = L.items.length ? 'Press Generate to build the model.' : 'Place some tools in Layout first.';
+    if (p === 'baseplate') { status('Baseplate: set the area and print size. In 3D, drag to turn and scroll to zoom.'); if (!S.bp) bpUpdate(); }
     toolbar(); draw();
   }
+
+  // The 3D preview on screen now (Generate, or the baseplate's 3D view), or null.
+  function in3d() { return S.phase === 'generate' || S.phase === 'baseplate' && S.bpView === '3d'; }
+  function shown3d() { return S.phase === 'generate' ? S.preview : in3d() ? S.bpPreview : null; }
 
   function toolbar() {
     var tb = $('toolbar'), html = '';
@@ -168,11 +173,14 @@
     } else if (S.phase === 'layout') {
       html = seg('tbTool', [['select', 'Select', 'Select, move, rotate (V)'], ['notch', 'Notch', 'Click to add or remove a finger notch (N)']], S.layTool) +
         '<button class="b" id="tbUndo" title="Undo (Ctrl+Z)">Undo</button><button class="b" id="tbRedo" title="Redo (Ctrl+Y)">Redo</button>';
+    } else if (S.phase === 'baseplate') {
+      html = seg('tbBpView', [['plan', 'Plan', 'Pieces laid out in the area'], ['3d', '3D', '3D preview of every piece']], S.bpView);
     }
     html += '<div class="sep"></div><button class="b" id="tbFit" title="Fit view (F, or double-click)">Fit view</button><button class="b" id="tbKeys" title="Keyboard shortcuts (?)">Shortcuts</button>';
     tb.innerHTML = html;
     if ($('tbView')) segButtons('tbView', function (m) { S.capView = m; toolbar(); draw(); });
     if ($('tbTool')) segButtons('tbTool', function (m) { if (S.phase === 'capture') S.capTool = m; else S.layTool = m; draw(); });
+    if ($('tbBpView')) segButtons('tbBpView', function (m) { S.bpView = m; bpPreview(); draw(); });
     if ($('tbBrush')) $('tbBrush').oninput = function () { S.brush = +this.value; draw(); };
     if ($('tbUndo')) $('tbUndo').onclick = undo;
     if ($('tbRedo')) $('tbRedo').onclick = redo;
@@ -185,7 +193,7 @@
     $('tbFit').onclick = function () {
       var v = S.views[viewKey()];
       if (v) v.fit = true;
-      if (S.preview) { S.preview.zoom = 1; }
+      if (shown3d()) shown3d().zoom = 1;
       draw();
     };
   }
@@ -1026,6 +1034,117 @@
     button('Pocket outline (SVG, 1:1)', function () { download(base + '_outline.svg', TT.svg(L, S.gen.fields), 'image/svg+xml'); });
   }
 
+  // ---------- Baseplate (on its own, not part of the bin steps) ----------
+
+  // Settings in mm; `unit` only changes how the area is shown and typed. Saved per browser.
+  var BPS = { w: 500, d: 400, unit: 1, clearance: 0.5, fill: true, maxPrint: 180, minRows: 2 };
+  try { Object.assign(BPS, JSON.parse(localStorage.getItem('tooltrace.baseplate') || '{}')); } catch (e) { /* ignore */ }
+  var BP_COLOURS = ['#ffd8a8', '#a5d8ff', '#b2f2bb', '#ffc9c9', '#d0bfff', '#fcc2d7', '#99e9f2', '#ffec99'];
+  S.bpView = 'plan'; S.bp = null; S.bpPreview = null;
+
+  ctl('bpAreaCtls', 'bpClear', 'Fit clearance (total)', 0, 3, 0.1, 0.5, 'mm', function (v) { BPS.clearance = Math.max(0, v); bpChanged(); });
+  ctl('bpPrintCtls', 'bpMax', 'Max print size', 100, 400, 1, 180, 'mm', function (v) { BPS.maxPrint = v; bpChanged(); });
+  ctl('bpPrintCtls', 'bpMin', 'Min connected rows', 1, 6, 1, 2, '', function (v) { BPS.minRows = Math.max(1, Math.round(v)); bpChanged(); });
+  C.bpClear.set(BPS.clearance); C.bpMax.set(BPS.maxPrint); C.bpMin.set(BPS.minRows);
+
+  function bpInputs() {
+    $('bpW').value = +(BPS.w / BPS.unit).toFixed(3); $('bpD').value = +(BPS.d / BPS.unit).toFixed(3);
+    $('bpUnit').value = String(BPS.unit);
+    $('bpFill').querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', (b.dataset.mode === 'pad') === BPS.fill); });
+  }
+  bpInputs();
+  ['w', 'd'].forEach(function (k) {
+    $(k === 'w' ? 'bpW' : 'bpD').oninput = function () {
+      var v = parseFloat(this.value);
+      if (v > 0) { BPS[k] = v * BPS.unit; bpChanged(); }
+    };
+  });
+  $('bpUnit').onchange = function () { BPS.unit = +this.value; bpInputs(); bpChanged(); };
+  segButtons('bpFill', function (m) { BPS.fill = m === 'pad'; bpChanged(); });
+
+  function bpChanged() {
+    try { localStorage.setItem('tooltrace.baseplate', JSON.stringify(BPS)); } catch (e) { /* storage unavailable */ }
+    later('bp', bpUpdate, 200);
+  }
+
+  // Plan the pieces, build and check one mesh per distinct print, list the downloads.
+  function bpUpdate() {
+    var p = S.bp = TT.bpPlan({ w: BPS.w, d: BPS.d, clearance: BPS.clearance, maxPrint: BPS.maxPrint, minRows: BPS.minRows, fill: BPS.fill });
+    S.bpPreview = null; S.bpOrient = {};
+    var box = $('bpDownloads');
+    box.innerHTML = '';
+    S.views.baseplate = { fit: true };
+    if (p.error) { $('bpInfo').innerHTML = '<span class="warn">' + esc(p.error) + '</span>'; draw(); return; }
+    var bad = 0, tris = 0;
+    p.types.forEach(function (t) {
+      t.mesh = TT.bpMesh(t);
+      t.mesh.shells.forEach(function (s) { if (TT.openEdges(s) || TT.volume(s) <= 0) bad++; tris += s.length / 9; });
+    });
+    var P = TT.BP.pitch, lines = ['Grid: ' + p.nx + ' × ' + p.ny + ' cells = ' + dims([p.nx * P, p.ny * P]) + ', centred'];
+    if (p.pad[0] || p.pad[1]) lines.push('Padding per side: ' + p.pad[0].toFixed(1) + ' mm left/right, ' + p.pad[1].toFixed(1) + ' mm front/back');
+    else if (!BPS.fill) lines.push('Gap per side: ' + p.grid[0].toFixed(1) + ' mm left/right, ' + p.grid[1].toFixed(1) + ' mm front/back');
+    lines.push(p.pieces.length + ' piece' + (p.pieces.length > 1 ? 's' : '') + ', ' + p.types.length + ' different print' + (p.types.length > 1 ? 's' : ''));
+    $('bpInfo').innerHTML = esc(lines.join('\n')) + '\n' + (bad ? '<span class="warn">Mesh check failed: ' + bad + ' open or inside-out bodies.</span>'
+      : '<span class="ok">Mesh check passed (every body closed).</span>') +
+      (p.warnings.length ? '\n<span class="warn">' + esc(p.warnings.join('\n')) + '</span>' : '');
+    function name(t) { return 'baseplate_' + t.label + '_' + t.kx + 'x' + t.ky + (t.pad.some(Boolean) ? '_padded' : '') + '_print' + t.count + '.stl'; }
+    function button(label, fn, primary) {
+      var b = document.createElement('button');
+      b.className = 'b' + (primary ? ' primary' : ''); b.textContent = label; b.onclick = fn;
+      box.appendChild(b);
+    }
+    if (p.types.length > 1) button('Download all ' + p.types.length + ' STLs', function () {
+      p.types.forEach(function (t, k) { setTimeout(function () { download(name(t), TT.stl(t.mesh.shells), 'model/stl'); }, k * 400); });
+    }, true);
+    p.types.forEach(function (t) {
+      button(t.label + ': ' + t.kx + ' × ' + t.ky + ' cells · ' + t.w.toFixed(1) + ' × ' + t.h.toFixed(1) + ' mm · print ' + t.count + '×',
+        function () { download(name(t), TT.stl(t.mesh.shells), 'model/stl'); }, p.types.length === 1);
+    });
+    bpPreview(); draw();
+  }
+
+  // 3D view: every piece in place, 3 mm apart so the joins show. Built only when it's shown.
+  function bpPreview() {
+    var p = S.bp;
+    if (S.bpView !== '3d' || !p || p.error || S.bpPreview) return;
+    S.bpPreview = new TT.Preview3D(p.pieces.map(function (pc) {
+      var k = pc.kx + 'x' + pc.ky + ':' + pc.pad.join(',');
+      if (!S.bpOrient[k]) S.bpOrient[k] = TT.bpMesh(pc);
+      return { shells: S.bpOrient[k].shells, ox: pc.x + pc.col * 3, oy: pc.y + pc.row * 3 };
+    }));
+  }
+
+  function drawBaseplate(dpr, cw, ch) {
+    var p = S.bp;
+    if (!p) { message(dpr, 'Enter the area to fill.'); return; }
+    if (S.bpView === '3d') { if (S.bpPreview) S.bpPreview.draw(ctx, cw, ch); else message(dpr, p.error || 'Nothing to show.'); return; }
+    var v = world(dpr), P = TT.BP.pitch, R = TT.BP.radius, Y = function (y) { return p.d - y; };
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, p.w, p.d);
+    ctx.strokeStyle = '#888'; ctx.lineWidth = 1 / v.s; ctx.setLineDash([6 / v.s, 4 / v.s]);
+    ctx.strokeRect(0, 0, p.w, p.d); ctx.setLineDash([]);
+    p.pieces.forEach(function (pc) {
+      ctx.beginPath(); roundRectPath(pc.x, Y(pc.y + pc.h), pc.w, pc.h, R);
+      ctx.fillStyle = BP_COLOURS[p.types.indexOf(pc.type) % BP_COLOURS.length]; ctx.fill();
+      ctx.beginPath();
+      for (var j = 0; j < pc.ky; j++) for (var i = 0; i < pc.kx; i++) roundRectPath(p.grid[0] + (pc.ix + i) * P, Y(p.grid[1] + (pc.iy + j + 1) * P), P, P, R);
+      ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1 / v.s; ctx.stroke();
+      ctx.beginPath(); roundRectPath(pc.x, Y(pc.y + pc.h), pc.w, pc.h, R);
+      ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5 / v.s; ctx.stroke();
+    });
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.textAlign = 'center';
+    p.pieces.forEach(function (pc) {
+      var x = (pc.x + pc.w / 2) * v.s + v.x, y = Y(pc.y + pc.h / 2) * v.s + v.y;
+      ctx.fillStyle = '#222'; ctx.font = '600 15px system-ui'; ctx.fillText(pc.type.label, x, y);
+      ctx.font = '12px system-ui'; ctx.fillText(pc.kx + ' × ' + pc.ky, x, y + 15);
+    });
+    ctx.fillStyle = '#555'; ctx.font = '12px system-ui';
+    ctx.fillText(dims([p.w, p.d]), (p.w / 2) * v.s + v.x, v.y - 6);
+    ctx.textAlign = 'start';
+    if (p.error) message(dpr, p.error);
+    drawRuler();
+  }
+
   // ---------- Views: zoom / pan ----------
 
   function viewKey() { return S.phase === 'capture' ? 'capture-' + S.capView : S.phase; }
@@ -1035,6 +1154,7 @@
     if (S.phase === 'capture' && S.capView === 'photo') return S.src ? [0, 0, S.src.width, S.src.height] : null;
     if (S.phase === 'capture') return S.warp ? [S.warp.ox, S.warp.oy, S.warp.ox + S.warp.w * S.warp.res, S.warp.oy + S.warp.h * S.warp.res] : null;
     if (S.phase === 'layout') return [-5, -5, TT.binSize(L.nx) + 5, TT.binSize(L.ny) + 5];
+    if (S.phase === 'baseplate' && S.bp) return [-8, -24, S.bp.w + 8, S.bp.d + 8];
     return null;
   }
 
@@ -1055,7 +1175,7 @@
 
   cv.addEventListener('wheel', function (e) {
     e.preventDefault();
-    if (S.phase === 'generate') { if (S.preview) { S.preview.zoom *= Math.exp(-e.deltaY * 0.0015); draw(); } return; }
+    if (in3d()) { if (shown3d()) { shown3d().zoom *= Math.exp(-e.deltaY * 0.0015); draw(); } return; }
     var v = vt(), r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, k = Math.exp(-e.deltaY * 0.0015);
     v.fit = false;
     v.x = mx - (mx - v.x) * k; v.y = my - (my - v.y) * k; v.s *= k;
@@ -1073,6 +1193,7 @@
     if (S.phase === 'capture' && S.capView === 'photo') drawPhoto(dpr);
     else if (S.phase === 'capture') drawTrace(dpr);
     else if (S.phase === 'layout') drawLayout(dpr);
+    else if (S.phase === 'baseplate') drawBaseplate(dpr, cw, ch);
     else drawModel(dpr, cw, ch);
   }
   window.addEventListener('resize', draw);
@@ -1348,11 +1469,12 @@
     var p = toWorld(e), v = vt();
     var panTool = S.phase === 'capture' && S.capView === 'trace' && S.capTool === 'pan';
     if (e.button === 1 || e.button === 2 || (S.space || panTool) && e.button === 0) { // pan
-      if (S.phase !== 'generate') { S.drag = { pan: true, sx: e.clientX, sy: e.clientY, vx: v.x, vy: v.y }; v.fit = false; cv.setPointerCapture(e.pointerId); }
+      if (!in3d()) { S.drag = { pan: true, sx: e.clientX, sy: e.clientY, vx: v.x, vy: v.y }; v.fit = false; cv.setPointerCapture(e.pointerId); }
       return;
     }
-    if (S.phase === 'generate') {
-      if (S.preview) { S.drag = { orbit: true, sx: e.clientX, sy: e.clientY, yaw: S.preview.yaw, pitch: S.preview.pitch }; cv.setPointerCapture(e.pointerId); }
+    if (in3d()) {
+      var pv = shown3d();
+      if (pv) { S.drag = { orbit: pv, sx: e.clientX, sy: e.clientY, yaw: pv.yaw, pitch: pv.pitch }; cv.setPointerCapture(e.pointerId); }
       return;
     }
     if (S.phase === 'capture' && S.capView === 'photo' && S.corners) {
@@ -1440,8 +1562,8 @@
     }
     if (d.pan) { var v = vt(); v.x = d.vx + e.clientX - d.sx; v.y = d.vy + e.clientY - d.sy; draw(); return; }
     if (d.orbit) {
-      S.preview.yaw = d.yaw + (e.clientX - d.sx) * 0.01;
-      S.preview.pitch = Math.max(-0.2, Math.min(1.57, d.pitch + (e.clientY - d.sy) * 0.01));
+      d.orbit.yaw = d.yaw + (e.clientX - d.sx) * 0.01;
+      d.orbit.pitch = Math.max(-0.2, Math.min(1.57, d.pitch + (e.clientY - d.sy) * 0.01));
       draw(); return;
     }
     var p = toWorld(e);
@@ -1525,12 +1647,12 @@
   function fitView() {
     var v = S.views[viewKey()];
     if (v) v.fit = true;
-    if (S.preview && S.phase === 'generate') S.preview.zoom = 1;
+    if (shown3d()) shown3d().zoom = 1;
     draw();
   }
 
   function zoomBy(k) {
-    if (S.phase === 'generate') { if (S.preview) { S.preview.zoom *= k; draw(); } return; }
+    if (in3d()) { if (shown3d()) { shown3d().zoom *= k; draw(); } return; }
     var v = vt(), mx = cv.clientWidth / 2, my = cv.clientHeight / 2;
     v.fit = false; v.x = mx - (mx - v.x) * k; v.y = my - (my - v.y) * k; v.s *= k;
     draw();
@@ -1663,7 +1785,7 @@
   syncLayoutInputs(); renderLib(); describeLayout(); layoutSnapshot(); toolbar(); draw();
   TT.app = {
     S: S, L: L, C: C, runFrom: runFrom, setPhase: setPhase, addItem: addItem, generate: generate, fitGrid: fitGrid,
-    selectShape: selectShape, draw: draw,
+    selectShape: selectShape, draw: draw, BPS: BPS, bpUpdate: bpUpdate,
     // For the tutorial: copy the bin, and put a copy back (also removes library shapes by id).
     layoutState: function () { return JSON.parse(JSON.stringify(L)); },
     restore: function (state, dropIds) {

@@ -2,7 +2,7 @@
 
 Turn photos of your tools into Gridfinity bins with a pocket shaped like each tool. Works offline: double-click `index.html`. Nothing to install.
 
-It works in three steps (tabs at the top). New to it? Press **Tutorial** (top right; it also opens by itself the first time). It walks through every step, and can load a built-in sample photo so you can try everything without a photo of your own. Arrow keys or Enter go forward and back, and Esc ends it.
+It works in three steps (tabs at the top). A fourth tab, **Baseplate**, makes an ultralight Gridfinity baseplate for a drawer (see below). New to it? Press **Tutorial** (top right; it also opens by itself the first time). It walks through every step, and can load a built-in sample photo so you can try everything without a photo of your own. Arrow keys or Enter go forward and back, and Esc ends it.
 
 ## 1. Capture: photo → outlines
 1. **Photo:** choose a photo of one or more tools lying flat.
@@ -63,6 +63,16 @@ Press **?** (or **Shortcuts** above the picture) for every keyboard shortcut.
 - **Generate model** builds the mesh, checks that every body is closed, and shows a 3D preview (drag to turn, scroll to zoom).
 - **Download** one STL per piece, plus a 1:1 SVG of the pocket outlines (e.g. for laser-cut foam).
 
+## Baseplate: an ultralight Gridfinity grid for a drawer
+The **Baseplate** tab (top bar) is separate from the bin steps. It fills an area with a lightweight Gridfinity baseplate, split into pieces that fit your printer.
+- **Width × depth:** the area to fill (mm or inches). Only whole 42 mm cells are used, centred in the area.
+- **Pad edges to fill** gives the outer pieces a frame (an outer wall tied to the grid by a rib on each grid line) so the plate fills the area exactly. **Leave gap** leaves the leftover space empty. **Fit clearance** is the total slack left so the plate drops in (0.5 mm default).
+- **Max print size:** the largest piece your bed takes (A1 mini 180 mm; A1, P1S, X1C 256 mm). Padding counts toward it.
+- **Min connected rows:** each piece is at least this many cells in both directions (default 2), unless the area or bed is too small; the panel says when.
+- **Pieces** lists each different print with how many to make. Pieces that are the same print turned on the bed are merged. **Plan** shows where each piece goes (letters match the list), **3D** shows them all.
+- Print settings: 0.4 nozzle, 3 walls, 0.28 mm layers, 0% infill, Arachne. 0.8 nozzle, 1 wall, 0.32 mm layers. Bambu Studio may warn about "floating regions"; that's the open underside and prints fine.
+- The geometry copies the "Lightest Gridfinity Base" idea by Sparky (MakerWorld): walls only (0.82 mm), no floor or bottom lip, top sliver removed, and holes where cells meet.
+
 ## What the bins are
 - Standard Gridfinity: 42 mm grid, 41.5 mm bins, 7 mm height units, and the standard 0.8 / 1.8 / 2.15 mm base profile on every cell.
 - Pockets have straight walls with a chamfered top edge. Each tool can have its own depth, and where pockets overlap the deeper one wins.
@@ -79,6 +89,7 @@ Press **?** (or **Shortcuts** above the picture) for every keyboard shortcut.
 - `js/vision.js`: perspective correction, tracing, distance transforms, contours, outline smoothing.
 - `js/grid.js`: cutting-mat grid detection and fitting.
 - `js/gridfinity.js`: pocket fields, bin geometry, mesh, STL/SVG export.
+- `js/baseplate.js`: ultralight baseplate planning (pieces) and mesh.
 - `js/preview3d.js`: 3D preview (software z-buffer).
 - `js/earcut.js`: polygon triangulation (port of mapbox/earcut, ISC license).
 - `js/app.js`: the UI.
