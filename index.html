@@ -34,6 +34,7 @@
   .ctl input[type=range] { width: 100%; margin: 3px 0 0; accent-color: var(--accent); }
   .field { display: flex; align-items: center; gap: 6px; margin: 7px 0; }
   .field > label { flex: 1; }
+  .field[hidden] { display: none; }
   .field select, .field input[type=text] { flex: 1.3; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; min-width: 0; }
   .field input[type=number] { width: 78px; padding: 3px 6px; text-align: right; border: 1px solid #ccc; border-radius: 4px; }
   .check { display: flex; align-items: center; gap: 6px; margin: 7px 0; }
@@ -360,8 +361,14 @@
         <button data-mode="pad">Pad edges to fill</button>
         <button data-mode="gap">Leave gap</button>
       </div>
+      <div class="seg" id="bpAlign" title="Where the leftover space (padding or gap) goes">
+        <button data-mode="even">Leftover split evenly</button>
+        <button data-mode="corner">Leftover in one corner</button>
+      </div>
+      <div class="field" id="bpCornerRow"><label>Leftover goes at the</label>
+        <select id="bpCorner"><option value="rb">back right</option><option value="lb">back left</option><option value="rf">front right</option><option value="lf">front left</option></select></div>
       <div id="bpAreaCtls"></div>
-      <ul class="tips"><li>Only whole 42 mm cells. The grid is centred; padding (or the gap) takes the rest.</li></ul>
+      <ul class="tips"><li>Only whole 42 mm cells; padding (or the gap) takes the rest.</li><li><b>One corner</b> keeps the other edges plain, so more pieces are standard. Front = bottom of the plan.</li></ul>
     </details>
     <details class="sec" open data-key="bpPrint"><summary>Printing</summary>
       <div id="bpPrintCtls"></div>

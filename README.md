@@ -67,6 +67,7 @@ Press **?** (or **Shortcuts** above the picture) for every keyboard shortcut.
 The **Baseplate** tab (top bar) is separate from the bin steps. It fills an area with a lightweight Gridfinity baseplate, split into pieces that fit your printer.
 - **Width × depth:** the area to fill (mm or inches). Only whole 42 mm cells are used, centred in the area.
 - **Pad edges to fill** gives the outer pieces a frame (an outer wall tied to the grid by a rib on each grid line) so the plate fills the area exactly. **Leave gap** leaves the leftover space empty. **Fit clearance** is the total slack left so the plate drops in (0.5 mm default).
+- **Leftover split evenly** centres the grid. **Leftover in one corner** puts all the padding (or gap) at the corner you pick (front = bottom of the plan), so the other edges are plain cells and more pieces are the same standard print.
 - **Max print size:** the largest piece your bed takes (A1 mini 180 mm; A1, P1S, X1C 256 mm). Padding counts toward it.
 - **Min connected rows:** each piece is at least this many cells in both directions (default 2), unless the area or bed is too small; the panel says when.
 - **Pieces** lists each different print with how many to make. Pieces that are the same print turned on the bed are merged. **Plan** shows where each piece goes (letters match the list), **3D** shows them all.

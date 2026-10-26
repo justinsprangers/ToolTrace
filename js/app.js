@@ -1037,7 +1037,7 @@
   // ---------- Baseplate (on its own, not part of the bin steps) ----------
 
   // Settings in mm; `unit` only changes how the area is shown and typed. Saved per browser.
-  var BPS = { w: 500, d: 400, unit: 1, clearance: 0.5, fill: true, maxPrint: 180, minRows: 2 };
+  var BPS = { w: 500, d: 400, unit: 1, clearance: 0.5, fill: true, oneCorner: false, corner: 'rb', maxPrint: 180, minRows: 2 };
   try { Object.assign(BPS, JSON.parse(localStorage.getItem('tooltrace.baseplate') || '{}')); } catch (e) { /* ignore */ }
   var BP_COLOURS = ['#ffd8a8', '#a5d8ff', '#b2f2bb', '#ffc9c9', '#d0bfff', '#fcc2d7', '#99e9f2', '#ffec99'];
   S.bpView = 'plan'; S.bp = null; S.bpPreview = null;
@@ -1051,6 +1051,8 @@
     $('bpW').value = +(BPS.w / BPS.unit).toFixed(3); $('bpD').value = +(BPS.d / BPS.unit).toFixed(3);
     $('bpUnit').value = String(BPS.unit);
     $('bpFill').querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', (b.dataset.mode === 'pad') === BPS.fill); });
+    $('bpAlign').querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', (b.dataset.mode === 'corner') === BPS.oneCorner); });
+    $('bpCorner').value = BPS.corner; $('bpCornerRow').hidden = !BPS.oneCorner;
   }
   bpInputs();
   ['w', 'd'].forEach(function (k) {
@@ -1061,6 +1063,8 @@
   });
   $('bpUnit').onchange = function () { BPS.unit = +this.value; bpInputs(); bpChanged(); };
   segButtons('bpFill', function (m) { BPS.fill = m === 'pad'; bpChanged(); });
+  segButtons('bpAlign', function (m) { BPS.oneCorner = m === 'corner'; $('bpCornerRow').hidden = !BPS.oneCorner; bpChanged(); });
+  $('bpCorner').onchange = function () { BPS.corner = this.value; bpChanged(); };
 
   function bpChanged() {
     try { localStorage.setItem('tooltrace.baseplate', JSON.stringify(BPS)); } catch (e) { /* storage unavailable */ }
@@ -1069,7 +1073,8 @@
 
   // Plan the pieces, build and check one mesh per distinct print, list the downloads.
   function bpUpdate() {
-    var p = S.bp = TT.bpPlan({ w: BPS.w, d: BPS.d, clearance: BPS.clearance, maxPrint: BPS.maxPrint, minRows: BPS.minRows, fill: BPS.fill });
+    var p = S.bp = TT.bpPlan({ w: BPS.w, d: BPS.d, clearance: BPS.clearance, maxPrint: BPS.maxPrint, minRows: BPS.minRows, fill: BPS.fill,
+      corner: BPS.oneCorner ? BPS.corner : null });
     S.bpPreview = null; S.bpOrient = {};
     var box = $('bpDownloads');
     box.innerHTML = '';
@@ -1080,9 +1085,12 @@
       t.mesh = TT.bpMesh(t);
       t.mesh.shells.forEach(function (s) { if (TT.openEdges(s) || TT.volume(s) <= 0) bad++; tris += s.length / 9; });
     });
-    var P = TT.BP.pitch, lines = ['Grid: ' + p.nx + ' × ' + p.ny + ' cells = ' + dims([p.nx * P, p.ny * P]) + ', centred'];
-    if (p.pad[0] || p.pad[1]) lines.push('Padding per side: ' + p.pad[0].toFixed(1) + ' mm left/right, ' + p.pad[1].toFixed(1) + ' mm front/back');
-    else if (!BPS.fill) lines.push('Gap per side: ' + p.grid[0].toFixed(1) + ' mm left/right, ' + p.grid[1].toFixed(1) + ' mm front/back');
+    var P = TT.BP.pitch, lines = ['Grid: ' + p.nx + ' × ' + p.ny + ' cells = ' + dims([p.nx * P, p.ny * P])];
+    // Padding (or gap) on each side that has some: "left 37.5, front 21.5 mm".
+    // Sides that only hold the clearance aren't listed.
+    var sides = ['left', 'front', 'right', 'back'], sp = BPS.fill ? p.pad : p.side, min = BPS.fill ? 0.05 : BPS.clearance / 2 + 0.05;
+    var parts = sides.map(function (s, i) { return sp[i] >= min ? s + ' ' + sp[i].toFixed(1) : ''; }).filter(Boolean);
+    if (parts.length) lines.push((BPS.fill ? 'Padding: ' : 'Gap: ') + parts.join(', ') + ' mm');
     lines.push(p.pieces.length + ' piece' + (p.pieces.length > 1 ? 's' : '') + ', ' + p.types.length + ' different print' + (p.types.length > 1 ? 's' : ''));
     $('bpInfo').innerHTML = esc(lines.join('\n')) + '\n' + (bad ? '<span class="warn">Mesh check failed: ' + bad + ' open or inside-out bodies.</span>'
       : '<span class="ok">Mesh check passed (every body closed).</span>') +

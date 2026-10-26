@@ -51,19 +51,23 @@ var TT = window.TT = window.TT || {};
   function rot90(p) { return { kx: p.ky, ky: p.kx, pad: [p.pad[3], p.pad[0], p.pad[1], p.pad[2]] }; }
   function pieceKey(p) { return p.kx + 'x' + p.ky + ':' + p.pad.map(function (v) { return v.toFixed(2); }).join(','); }
 
-  // o = {w, d (area mm), clearance (total, per axis), maxPrint (mm), minRows, fill (pad edges)}.
-  // Returns {nx, ny, grid: [x0, y0], pad: [px, py], pieces, types, warnings, error}.
+  // o = {w, d (area mm), clearance (total, per axis), maxPrint (mm), minRows, fill (pad edges),
+  // corner (optional, see below)}. Returns {nx, ny, grid: [x0, y0], side, pad (both [l, f, r, b]),
+  // pieces, types, warnings, error}.
   TT.bpPlan = function (o) {
     var P = B.pitch, nx = Math.floor((o.w - o.clearance + 1e-6) / P), ny = Math.floor((o.d - o.clearance + 1e-6) / P);
     var out = { w: o.w, d: o.d, nx: nx, ny: ny, pieces: [], types: [], warnings: [] };
     if (nx < 1 || ny < 1) { out.error = 'The area is smaller than one 42 mm cell.'; return out; }
-    var mx = (o.w - nx * P) / 2, my = (o.d - ny * P) / 2;
-    var px = o.fill ? Math.max(0, mx - o.clearance / 2) : 0, py = o.fill ? Math.max(0, my - o.clearance / 2) : 0;
-    if (px < 0.05) px = 0;
-    if (py < 0.05) py = 0;
-    out.grid = [mx, my]; out.pad = [px, py];
-    var cols = splitAxis(nx, px, px, o.maxPrint, o.minRows), rows = splitAxis(ny, py, py, o.maxPrint, o.minRows);
-    if (!cols || !rows) { out.error = 'A piece of one cell' + (px || py ? ' plus padding' : '') + ' is bigger than the max print size.'; return out; }
+    // Leftover space per side [left, front, right, back], clearance included: split evenly, or
+    // all on the sides of o.corner ('lf', 'rb', ...: left/right + front/back) so the opposite
+    // edges are plain cells. Padding = that space minus half the clearance.
+    var lx = o.w - nx * P, ly = o.d - ny * P, c2 = o.clearance / 2, k = o.corner;
+    var side = k ? [k[0] === 'l' ? lx - c2 : c2, k[1] === 'f' ? ly - c2 : c2, k[0] === 'r' ? lx - c2 : c2, k[1] === 'b' ? ly - c2 : c2]
+      : [lx / 2, ly / 2, lx / 2, ly / 2];
+    var pad = side.map(function (m) { return o.fill && m - c2 >= 0.05 ? m - c2 : 0; });
+    out.grid = [side[0], side[1]]; out.side = side; out.pad = pad;
+    var cols = splitAxis(nx, pad[0], pad[2], o.maxPrint, o.minRows), rows = splitAxis(ny, pad[1], pad[3], o.maxPrint, o.minRows);
+    if (!cols || !rows) { out.error = 'A piece of one cell' + (pad.some(Boolean) ? ' plus padding' : '') + ' is bigger than the max print size.'; return out; }
     var shortest = Math.min(cols.min, rows.min);
     if (shortest < o.minRows) {
       out.warnings.push(Math.min(nx, ny) < o.minRows ? 'The area is only ' + Math.min(nx, ny) + ' cell' + (Math.min(nx, ny) > 1 ? 's' : '') + ' across, so some pieces are narrower than ' + o.minRows + ' rows.'
@@ -73,13 +77,13 @@ var TT = window.TT = window.TT || {};
     rows.sizes.forEach(function (ky, r) {
       var ix = 0;
       cols.sizes.forEach(function (kx, c) {
-        var pad = [c === 0 ? px : 0, r === 0 ? py : 0, c === cols.sizes.length - 1 ? px : 0, r === rows.sizes.length - 1 ? py : 0];
-        var pc = { ix: ix, iy: iy, kx: kx, ky: ky, col: c, row: r, pad: pad,
-          x: mx + ix * P - pad[0], y: my + iy * P - pad[1], w: kx * P + pad[0] + pad[2], h: ky * P + pad[1] + pad[3] };
+        var pp = [c === 0 ? pad[0] : 0, r === 0 ? pad[1] : 0, c === cols.sizes.length - 1 ? pad[2] : 0, r === rows.sizes.length - 1 ? pad[3] : 0];
+        var pc = { ix: ix, iy: iy, kx: kx, ky: ky, col: c, row: r, pad: pp,
+          x: side[0] + ix * P - pp[0], y: side[1] + iy * P - pp[1], w: kx * P + pp[0] + pp[2], h: ky * P + pp[1] + pp[3] };
         // Same print = same piece turned on the bed (mirror images are different prints).
         var q = pc, key = pieceKey(q);
         for (var t = 0; t < 3; t++) { q = rot90(q); if (pieceKey(q) < key) key = pieceKey(q); }
-        if (!types[key]) { types[key] = { key: key, kx: kx, ky: ky, pad: pad, w: pc.w, h: pc.h, count: 0 }; out.types.push(types[key]); }
+        if (!types[key]) { types[key] = { key: key, kx: kx, ky: ky, pad: pp, w: pc.w, h: pc.h, count: 0 }; out.types.push(types[key]); }
         types[key].count++;
         pc.type = types[key];
         out.pieces.push(pc);
