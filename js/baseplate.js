@@ -96,6 +96,56 @@ var TT = window.TT = window.TT || {};
     return out;
   };
 
+  // ---------- Laser-cut sheet ----------
+
+  // Rounded rectangle x0..x1, y0..y1 (y up), counter-clockwise, arcs as `seg` steps per corner.
+  function roundRectPts(x0, y0, x1, y1, r, seg) {
+    var pts = [], c = [[x1 - r, y0 + r, -90], [x1 - r, y1 - r, 0], [x0 + r, y1 - r, 90], [x0 + r, y0 + r, 180]];
+    c.forEach(function (k) {
+      for (var i = 0; i <= seg; i++) {
+        var a = (k[2] + 90 * i / seg) * Math.PI / 180;
+        pts.push([k[0] + r * Math.cos(a), k[1] + r * Math.sin(a)]);
+      }
+    });
+    return pts;
+  }
+
+  // One flat sheet for the whole area (o = {hole, kerf}): the outer edge (padded area minus the
+  // clearance, or just the grid in gap mode) and one hole per cell for the bin feet. A bin foot
+  // is 37.2 mm square (corner r 1.6) for its 1.8 mm straight part, so a slightly bigger hole lets
+  // the foot drop in and the 45° chamfer above it rest on the hole edge. Kerf: the outline grows
+  // and the holes shrink by kerf/2. Returns {outline, holes, w, h} in area mm (y up).
+  TT.bpLaser = function (p, o) {
+    var P = B.pitch, k2 = o.kerf / 2;
+    var fill = p.pad.some(Boolean), x0, y0, x1, y1;
+    if (fill) { x0 = p.side[0] - p.pad[0]; y0 = p.side[1] - p.pad[1]; x1 = p.side[0] + p.nx * P + p.pad[2]; y1 = p.side[1] + p.ny * P + p.pad[3]; }
+    else { x0 = p.grid[0]; y0 = p.grid[1]; x1 = x0 + p.nx * P; y1 = y0 + p.ny * P; }
+    var outline = roundRectPts(x0 - k2, y0 - k2, x1 + k2, y1 + k2, B.radius + k2, 8), holes = [];
+    var s = o.hole - o.kerf, r = Math.max(0.3, 1.6 + (o.hole - 37.2) / 2 - k2);
+    for (var j = 0; j < p.ny; j++) for (var i = 0; i < p.nx; i++) {
+      var cx = p.grid[0] + (i + 0.5) * P, cy = p.grid[1] + (j + 0.5) * P;
+      holes.push(roundRectPts(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2, Math.min(r, s / 2), 6).reverse());
+    }
+    return { outline: outline, holes: holes, box: [x0, y0, x1, y1], w: x1 - x0, h: y1 - y0, web: P - o.hole };
+  };
+
+  // DXF R12 in mm (same style as LaserBoxes): closed POLYLINEs on layer CUT, sheet corner at 0, 0.
+  TT.bpDxf = function (L, note) {
+    var o = [], f = function (v) { return (Math.round(v * 1000) / 1000).toString(); };
+    var ox = L.box[0], oy = L.box[1];
+    function poly(pts) {
+      o.push('0', 'POLYLINE', '8', 'CUT', '66', '1', '70', '1', '10', '0', '20', '0', '30', '0');
+      pts.forEach(function (q) { o.push('0', 'VERTEX', '8', 'CUT', '10', f(q[0] - ox), '20', f(q[1] - oy), '30', '0'); });
+      o.push('0', 'SEQEND', '8', 'CUT');
+    }
+    o.push('999', note || 'ToolTrace Gridfinity baseplate', '0', 'SECTION', '2', 'HEADER', '9', '$INSUNITS', '70', '4', '9', '$MEASUREMENT', '70', '1', '0', 'ENDSEC',
+      '0', 'SECTION', '2', 'ENTITIES');
+    L.holes.forEach(poly);
+    poly(L.outline);
+    o.push('0', 'ENDSEC', '0', 'EOF');
+    return o.join('\r\n') + '\r\n';
+  };
+
   // ---------- Mesh ----------
 
   function Mesh() { this.v = []; }

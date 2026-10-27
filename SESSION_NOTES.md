@@ -13,12 +13,14 @@
 - Improve auto grid detection on far shots (photos 1 and 4 in `test-photos/`).
 - Print a test bin to verify pocket clearance and Gridfinity fit on real hardware.
 - Print a baseplate piece (padded corner) and check bin fit, the padding frame, and Bambu's slicing of the overlapping shells.
+- Test-cut a small laser baseplate (e.g. 2 × 2) to check the 37.5 mm hole fit; DXF not yet opened in LightBurn.
 
 ## Decisions & gotchas
 - See `CLAUDE.md` for architecture rules, rejected approaches, and testing tricks.
 - The user's previous session was very long (1,400+ messages). Compact early.
 
 ## Log
+- 2026-10-27: Baseplate: laser-cut DXF of the whole area (hole per cell, kerf)
 - 2026-10-26: Baseplate: leftover split evenly or all in one corner (more standard pieces)
 - 2026-10-26: Baseplate tab (ultralight Gridfinity baseplate generator)
 - 2026-10-21: Tutorial with sample photo; tour uses only that run's tools (2cb5981)

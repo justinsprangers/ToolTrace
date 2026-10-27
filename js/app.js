@@ -174,7 +174,8 @@
       html = seg('tbTool', [['select', 'Select', 'Select, move, rotate (V)'], ['notch', 'Notch', 'Click to add or remove a finger notch (N)']], S.layTool) +
         '<button class="b" id="tbUndo" title="Undo (Ctrl+Z)">Undo</button><button class="b" id="tbRedo" title="Redo (Ctrl+Y)">Redo</button>';
     } else if (S.phase === 'baseplate') {
-      html = seg('tbBpView', [['plan', 'Plan', 'Pieces laid out in the area'], ['3d', '3D', '3D preview of every piece']], S.bpView);
+      html = seg('tbBpView', [['plan', 'Plan', 'Pieces laid out in the area'], ['3d', '3D', '3D preview of every piece'],
+        ['laser', 'Laser', 'The laser-cut sheet (DXF)']], S.bpView);
     }
     html += '<div class="sep"></div><button class="b" id="tbFit" title="Fit view (F, or double-click)">Fit view</button><button class="b" id="tbKeys" title="Keyboard shortcuts (?)">Shortcuts</button>';
     tb.innerHTML = html;
@@ -1037,7 +1038,7 @@
   // ---------- Baseplate (on its own, not part of the bin steps) ----------
 
   // Settings in mm; `unit` only changes how the area is shown and typed. Saved per browser.
-  var BPS = { w: 500, d: 400, unit: 1, clearance: 0.5, fill: true, oneCorner: false, corner: 'rb', maxPrint: 180, minRows: 2 };
+  var BPS = { w: 500, d: 400, unit: 1, clearance: 0.5, fill: true, oneCorner: false, corner: 'rb', maxPrint: 180, minRows: 2, hole: 37.5, kerf: 0.15 };
   try { Object.assign(BPS, JSON.parse(localStorage.getItem('tooltrace.baseplate') || '{}')); } catch (e) { /* ignore */ }
   var BP_COLOURS = ['#ffd8a8', '#a5d8ff', '#b2f2bb', '#ffc9c9', '#d0bfff', '#fcc2d7', '#99e9f2', '#ffec99'];
   S.bpView = 'plan'; S.bp = null; S.bpPreview = null;
@@ -1045,7 +1046,15 @@
   ctl('bpAreaCtls', 'bpClear', 'Fit clearance (total)', 0, 3, 0.1, 0.5, 'mm', function (v) { BPS.clearance = Math.max(0, v); bpChanged(); });
   ctl('bpPrintCtls', 'bpMax', 'Max print size', 100, 400, 1, 180, 'mm', function (v) { BPS.maxPrint = v; bpChanged(); });
   ctl('bpPrintCtls', 'bpMin', 'Min connected rows', 1, 6, 1, 2, '', function (v) { BPS.minRows = Math.max(1, Math.round(v)); bpChanged(); });
-  C.bpClear.set(BPS.clearance); C.bpMax.set(BPS.maxPrint); C.bpMin.set(BPS.minRows);
+  ctl('bpLaserCtls', 'bpHole', 'Hole size', 36, 40, 0.1, 37.5, 'mm', function (v) { BPS.hole = v; bpChanged(); });
+  ctl('bpLaserCtls', 'bpKerf', 'Kerf', 0, 0.5, 0.01, 0.15, 'mm', function (v) { BPS.kerf = Math.max(0, v); bpChanged(); });
+  C.bpClear.set(BPS.clearance); C.bpMax.set(BPS.maxPrint); C.bpMin.set(BPS.minRows); C.bpHole.set(BPS.hole); C.bpKerf.set(BPS.kerf);
+  $('bpDxf').onclick = function () {
+    var p = S.bp;
+    if (!p || p.error || !S.bpLaser) return;
+    var L = S.bpLaser, size = L.w.toFixed(0) + 'x' + L.h.toFixed(0);
+    download('baseplate_laser_' + size + 'mm.dxf', TT.bpDxf(L, 'ToolTrace Gridfinity baseplate ' + p.nx + 'x' + p.ny + ', hole ' + BPS.hole + ' mm, kerf ' + BPS.kerf + ' mm'), 'application/dxf');
+  };
 
   function bpInputs() {
     $('bpW').value = +(BPS.w / BPS.unit).toFixed(3); $('bpD').value = +(BPS.d / BPS.unit).toFixed(3);
@@ -1079,7 +1088,11 @@
     var box = $('bpDownloads');
     box.innerHTML = '';
     S.views.baseplate = { fit: true };
+    S.bpLaser = null; $('bpDxf').disabled = !!p.error; $('bpLaserInfo').textContent = '';
     if (p.error) { $('bpInfo').innerHTML = '<span class="warn">' + esc(p.error) + '</span>'; draw(); return; }
+    var Lz = S.bpLaser = TT.bpLaser(p, { hole: BPS.hole, kerf: BPS.kerf });
+    $('bpLaserInfo').innerHTML = esc('Sheet: ' + dims([Lz.w, Lz.h]) + ', ' + Lz.holes.length + ' holes') +
+      (Lz.web < 2 ? '\n<span class="warn">Only ' + Lz.web.toFixed(1) + ' mm of material between holes.</span>' : '');
     var bad = 0, tris = 0;
     p.types.forEach(function (t) {
       t.mesh = TT.bpMesh(t);
@@ -1130,6 +1143,22 @@
     ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, p.w, p.d);
     ctx.strokeStyle = '#888'; ctx.lineWidth = 1 / v.s; ctx.setLineDash([6 / v.s, 4 / v.s]);
     ctx.strokeRect(0, 0, p.w, p.d); ctx.setLineDash([]);
+    if (S.bpView === 'laser' && S.bpLaser) {
+      // The sheet as cut: material in tan, cut lines in red.
+      ctx.beginPath();
+      [S.bpLaser.outline].concat(S.bpLaser.holes).forEach(function (l) {
+        l.forEach(function (q, i) { ctx[i ? 'lineTo' : 'moveTo'](q[0], Y(q[1])); });
+        ctx.closePath();
+      });
+      ctx.fillStyle = '#e9d3a9'; ctx.fill('evenodd');
+      ctx.strokeStyle = '#e03131'; ctx.lineWidth = 1 / v.s; ctx.stroke();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = '#555'; ctx.font = '12px system-ui'; ctx.textAlign = 'center';
+      ctx.fillText('Sheet ' + dims([S.bpLaser.w, S.bpLaser.h]) + ' in a ' + dims([p.w, p.d]) + ' area', (p.w / 2) * v.s + v.x, v.y - 6);
+      ctx.textAlign = 'start';
+      drawRuler();
+      return;
+    }
     p.pieces.forEach(function (pc) {
       ctx.beginPath(); roundRectPath(pc.x, Y(pc.y + pc.h), pc.w, pc.h, R);
       ctx.fillStyle = BP_COLOURS[p.types.indexOf(pc.type) % BP_COLOURS.length]; ctx.fill();
