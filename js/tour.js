@@ -251,7 +251,7 @@ var TT = window.TT = window.TT || {};
     usedSample = false;
     var before = {};
     A().S.libOrder.forEach(function (id) { before[id] = 1; });
-    saved = { layout: A().layoutState(), libBefore: before };
+    saved = { layout: A().layoutState(), libBefore: before, phase: A().S.phase };
     TT.tourOpen = true;
     document.body.classList.add('touring');
     hi.hidden = card.hidden = dim.hidden = false;
@@ -265,6 +265,7 @@ var TT = window.TT = window.TT || {};
     // Put the user's bin back; drop the sample tools (shapes from their own photo stay).
     if (saved) {
       A().restore(saved.layout, usedSample ? tourIds() : []);
+      A().setPhase(saved.phase); // back where the tour started
       saved = null;
     }
     TT.tourSample = false;

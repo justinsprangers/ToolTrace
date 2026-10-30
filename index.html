@@ -22,6 +22,8 @@
   .phases.sub { align-items: center; padding-left: 10px; border-left: 1px solid var(--line); }
   .phases.sub span { color: var(--mute); font-size: 12.5px; margin-right: 2px; }
   .phases.sub button { padding: 3px 10px; font-size: 13px; }
+  .phases[hidden], button[hidden], .btns[hidden] { display: none; }
+  .phases button.parent { background: #e9ecef; border-color: #adb5bd; }
   header .spacer { flex: 1; }
   main { display: grid; grid-template-columns: 370px 1fr; flex: 1; min-height: 0; }
   aside { overflow-y: auto; min-height: 0; border-right: 1px solid var(--line); background: var(--panel); padding: 4px 16px 40px; }
@@ -151,12 +153,12 @@
     <button data-phase="bins" title="Plan the bins on the drawer grid"><b>3</b>Bins</button>
     <button data-phase="make" title="Everything to print or cut"><b>4</b>Make</button>
   </div>
-  <div class="phases sub" title="Steps for a bin with tool-shaped pockets">
+  <div class="phases sub" id="toolSteps" title="Steps for a bin with tool-shaped pockets" hidden>
     <span id="toolBinName">Tool bin:</span>
     <button data-phase="capture">Capture</button>
     <button data-phase="layout">Layout</button>
     <button data-phase="generate">Generate</button>
-    <button class="b primary" id="toolDone" title="Save this tool bin design and go back to Bins" hidden>Done ← Bins</button>
+    <button class="b primary" id="toolDone" title="Save this tool bin design and go back to Bins">Done ← Bins</button>
   </div>
   <div class="spacer"></div>
   <button class="b" id="tourBtn" title="A guided walk-through of the whole tool">Tutorial</button>
@@ -544,16 +546,17 @@
   <h3>Generate</h3>
   <table><tr><td><kbd>G</kbd></td><td>Generate model</td></tr></table>
 </dialog>
-<script src="js/earcut.js"></script>
-<script src="js/vision.js"></script>
-<script src="js/grid.js"></script>
-<script src="js/gridfinity.js"></script>
-<script src="js/baseplate.js"></script>
-<script src="js/zip.js"></script>
-<script src="js/make.js"></script>
-<script src="js/preview3d.js"></script>
-<script src="js/bins.js"></script>
-<script src="js/app.js"></script>
-<script src="js/tour.js"></script>
+<!-- ?v= makes browsers (and GitHub Pages' cache) fetch new scripts with a new page; bump it on every change. -->
+<script src="js/earcut.js?v=7"></script>
+<script src="js/vision.js?v=7"></script>
+<script src="js/grid.js?v=7"></script>
+<script src="js/gridfinity.js?v=7"></script>
+<script src="js/baseplate.js?v=7"></script>
+<script src="js/zip.js?v=7"></script>
+<script src="js/make.js?v=7"></script>
+<script src="js/preview3d.js?v=7"></script>
+<script src="js/bins.js?v=7"></script>
+<script src="js/app.js?v=7"></script>
+<script src="js/tour.js?v=7"></script>
 </body>
 </html>

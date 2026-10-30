@@ -13,11 +13,12 @@ One project = one drawer. It's saved in your browser automatically; **Save proje
 
 ## Bins
 Designing a bin and putting it in the drawer are separate: you keep a list of **bin designs**, then place copies of them.
-- **Bin designs:** **+ Standard bin** makes a plain design; click it to set its **name**, **size**, **height** (7 mm units), **compartments** (across × deep), **label tab** (along the back, 45° underside so it prints without support), **finger scoop** (curved front) and **stacking lip**. **+ Tool bin** opens the Tool bin steps below; press **Done ← Bins** (top) when finished. Double-click a tool design, or press **Edit tools**, to go back to it. Changing a design changes every placed copy.
+- **Bin designs:** **+ Standard bin** makes a plain design; click it to set its **name**, **size**, **height** (7 mm units), **compartments** (across × deep), **label tab** (along the back, 45° underside so it prints without support), **finger scoop** (curved front) and **stacking lip**. **+ Tool bin** opens the Tool bin steps below (they only show in the header while you're editing a tool bin); press **Done ← Bins** (top) when finished. A new tool bin left with no tools is discarded. Double-click a tool design, or press **Edit tools**, to go back to it. Changing a design changes every placed copy.
 - **Place:** press **Place** on a design (or drag it from the list onto the drawer). A ghost follows the pointer: blue fits, red doesn't. Click to drop it; **R** or right-click turns it 90°, Shift-click keeps placing, Esc stops.
 - **In the drawer:** click a bin, then **R** rotates it (Shift+R the other way), drag moves it, its corner dot resizes its design, and **Delete** takes it out (the design stays). **Make unique** gives one copy its own design. Dragging across empty cells makes a plain bin; **Fill empty cells** packs every gap with bins up to the size you set, biggest first. Both reuse a matching plain design instead of making new ones.
 - Red outlines: the bin overlaps another, sits outside the grid, is taller than the drawer, or is a tool bin with no tools yet.
-- Only placed designs are made; Make lists the rest as not in the drawer.
+- Only placed designs are made; Make lists the rest as not in the drawer. Tool bins too big for your bed (Max print size) are split into pieces that fit.
+- The canvas toolbar shows **Rotate 90°** and **Remove from drawer** for the selected bin, and **Rotate** / **Stop placing** while placing.
 
 ## Make
 - One list of everything: **test** items first (baseplate test piece or laser hole-size strip), then the **baseplate**, then the **bins**, with how many of each. Identical bins are listed once with a count.

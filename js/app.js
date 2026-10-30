@@ -157,16 +157,31 @@
   document.querySelectorAll('.phases button').forEach(function (b) { b.onclick = function () { setPhase(b.dataset.phase); }; });
 
   function setPhase(p) {
+    // Leaving the tool-bin steps for Bins shows the design that was being edited; a new one left
+    // without tools (and not placed) is discarded rather than cluttering the list.
+    var cd = p === 'bins' && /^(capture|layout|generate)$/.test(S.phase) && designById(S.curDesign);
+    var discarded = cd && !L.items.length && !placedOf(cd).length;
+    if (discarded) deleteDesign(cd);
+    else if (cd) { S.desSel = cd.id; S.binSel = null; }
     S.phase = p;
     if (p !== 'bins') S.placing = null;
-    document.querySelectorAll('.phases button').forEach(function (b) { b.classList.toggle('on', b.dataset.phase === p); });
-    $('toolDone').hidden = !/^(capture|layout|generate)$/.test(p);
+    // The tool-bin steps only show while a tool bin is being edited; Bins is marked as their parent.
+    var tool = /^(capture|layout|generate)$/.test(p);
+    document.querySelectorAll('.phases button').forEach(function (b) {
+      b.classList.toggle('on', b.dataset.phase === p);
+      b.classList.toggle('parent', tool && b.dataset.phase === 'bins');
+    });
+    $('toolSteps').hidden = !tool;
+    if (tool) toolBinLabel();
     document.querySelectorAll('aside > .panel').forEach(function (el) { el.hidden = el.id !== 'panel-' + p; });
     if (p === 'layout') renderLib();
     if (p === 'generate' && !S.gen) $('genInfo').textContent = L.items.length ? 'Press Generate to build the model.' : 'Place some tools in Layout first.';
+    if (p === 'capture') status('Capture: load a photo of tools on paper or a grid mat, trace them, then add them to the library.');
+    if (p === 'layout') status('Layout: add tools from the library and arrange them. Press Done ← Bins (top) when finished.');
+    if (p === 'generate') status(L.items.length ? 'Generate: build the 3D model to check it. Press Done ← Bins (top) when finished.' : 'Place some tools in Layout first.');
     if (p === 'drawer') status('Drawer: measure the inside of the drawer or space, then pick a baseplate.');
     if (p === 'baseplate') status('Baseplate: padding and print size. In 3D, drag to turn and scroll to zoom.');
-    if (p === 'bins') status('Bins: make designs on the left, then Place them in the drawer. Drag a bin to move it, R rotates.');
+    if (p === 'bins') status(discarded ? 'Empty tool bin discarded (no tools were placed).' : 'Bins: make designs on the left, then Place them in the drawer. Drag a bin to move it, R rotates.');
     if (/^(drawer|baseplate|bins)$/.test(p) && !S.bp) bpUpdate();
     if (p === 'bins') renderBins();
     if (p === 'make') { status('Make: print or cut the test items first, then the rest. Tick things off as you go.'); if (!S.make) { if (!S.bp) bpUpdate(); renderMake(); } }
@@ -200,6 +215,10 @@
     } else if (S.phase === 'baseplate') {
       html = seg('tbBpView', [['plan', 'Plan', 'Pieces laid out in the area'], ['3d', '3D', '3D preview of every piece'],
         ['laser', 'Laser', 'The laser-cut sheet (DXF)']], S.bpView);
+    } else if (S.phase === 'bins') {
+      // What you can do right now: placing, or with a bin selected.
+      if (S.placing) html = '<button class="b" id="tbRot" title="Turn the bin being placed (R, or right-click)">Rotate 90°</button><button class="b" id="tbStop" title="Stop placing (Esc)">Stop placing</button>';
+      else if (S.binSel) html = '<button class="b" id="tbRot" title="Turn the selected bin (R; Shift+R the other way)">Rotate 90°</button><button class="b" id="tbDel" title="Take it out of the drawer (Delete); the design stays">Remove from drawer</button>';
     }
     html += '<div class="sep"></div><button class="b" id="tbFit" title="Fit view (F, or double-click)">Fit view</button><button class="b" id="tbKeys" title="Keyboard shortcuts (?)">Shortcuts</button>';
     tb.innerHTML = html;
@@ -215,6 +234,9 @@
       }
     };
     $('tbKeys').onclick = function () { $('keys').showModal(); };
+    if ($('tbRot')) $('tbRot').onclick = function () { if (S.placing) rotatePlacing(1); else if (selBin()) rotateBin(selBin(), 1); };
+    if ($('tbStop')) $('tbStop').onclick = stopPlacing;
+    if ($('tbDel')) $('tbDel').onclick = function () { if (selBin()) removeBin(selBin()); };
     $('tbFit').onclick = function () {
       var v = S.views[viewKey()];
       if (v) v.fit = true;
@@ -1081,6 +1103,8 @@
     var byKey = {};
     PRJ.designs = []; PRJ.bins = [];
     old.forEach(function (b) {
+      // Tool bins with no tools were the old "Add tool bin" left unused: drop them.
+      if (b.kind === 'tool' && !(b.layout && b.layout.items && b.layout.items.length)) return;
       b.opt = b.opt || { cx: 1, cy: 1, label: false, scoop: false, lip: b.kind === 'std' };
       var k = b.kind === 'std' && stdKey(b), des = k && byKey[k];
       if (!des) {
@@ -1263,7 +1287,7 @@
   var LAYOUT_DEFAULTS = JSON.parse(JSON.stringify(L));
   S.binSel = null; S.desSel = null; S.placing = null; S.curDesign = PRJ.cur || null;
   ctl('binNewCtls', 'binFillMax', 'Fill with bins up to', 1, 6, 1, 3, 'cells', function () {});
-  ctl('binNewCtls', 'binNewU', 'New bin height', 1, 20, 1, 6, 'units', function () {});
+  ctl('binNewCtls', 'binNewU', 'Height of new bins', 1, 20, 1, 6, 'units', function () {});
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
   function designById(id) { return PRJ.designs.find(function (d) { return d.id === id; }) || null; }
@@ -1369,9 +1393,8 @@
   $('toolDone').onclick = function () {
     save();
     var d = designById(S.curDesign);
-    S.binSel = null; if (d) S.desSel = d.id;
     setPhase('bins');
-    if (d && !placedOf(d).length) status(designName(d) + ' is saved. Press Place to put it in the drawer.');
+    if (d && designById(d.id) && !placedOf(d).length) status(designName(d) + ' is saved. Press Place to put it in the drawer.');
   };
 
   // Take a placed bin out of the drawer (its design stays).
@@ -1462,7 +1485,7 @@
         e.dataTransfer.setData('text/plain', d.id); e.dataTransfer.effectAllowed = 'copy';
         S.placing = { design: d.id, rot: 0, at: null }; S.desSel = d.id;
       };
-      row.ondragend = function () { S.placing = null; draw(); };
+      row.ondragend = function () { if (S.placing) { S.placing = null; draw(); } };
       list.appendChild(row);
     });
     if (!PRJ.designs.length) list.innerHTML = '<div class="hint">No designs yet. Make one above, or drag across empty cells in the drawer.</div>';
@@ -1497,6 +1520,7 @@
       $('binSelInfo').textContent = f[0] + ' × ' + f[1] + ' cells at column ' + (b.x + 1) + ', row ' + (b.y + 1) + ' from the front-left' +
         (b.rot ? ', turned ' + b.rot * 90 + '°' : '') + '.' + (probs[b.id] ? ' ' + probs[b.id].join(', ') + '.' : '');
     }
+    if (S.phase === 'bins') toolbar();
   }
 
   // A design's top view as a small canvas for the list.
@@ -1618,6 +1642,7 @@
     renderBins(); draw(); cv.focus();
     status('Placing ' + designName(d) + ': click a spot in the drawer. R or right-click turns it, Shift-click places more, Esc stops.');
   }
+  function stopPlacing() { S.placing = null; status('Stopped placing.'); renderBins(); draw(); }
   function placingFoot() { return turned(designById(S.placing.design), S.placing.rot); }
   // Front-left cell for the ghost: centred on the cell under the pointer, kept inside the grid.
   function placingAt(w) {
@@ -1654,7 +1679,7 @@
     if (S.phase !== 'bins' || !S.placing) return;
     e.preventDefault();
     S.placing.at = placingAt(toWorld(e));
-    dropPlacing(false); S.placing = null; draw();
+    dropPlacing(false); S.placing = null; renderBins(); draw();
   });
 
   // Canvas: cell under a world point (screen y down), and a bin's rectangle in world coords.
@@ -1817,11 +1842,17 @@
   // A tool bin's printable pieces, built the same way as Generate.
   function toolBinPieces(b) {
     return withLayout(b, function () {
+      // Split to fit the project's bed (Max print size), even if the bin allows bigger pieces.
+      var keepMax = L.maxUnits;
+      L.maxUnits = Math.max(1, Math.min(L.maxUnits, Math.floor((BPS.maxPrint + G.gap) / TT.BP.pitch)));
+      try { return piecesOf(); } finally { L.maxUnits = keepMax; }
+    });
+    function piecesOf() {
       var GL = layoutForGeometry(), lib = libForGeometry();
       if (L.autoUnits) GL.units = TT.autoHeight(GL);
       var fields = TT.pocketFields(GL, lib);
       return TT.pieces(L).map(function (pc) { return { pc: pc, mesh: TT.pieceMesh(GL, fields, pc), units: GL.units }; });
-    });
+    }
   }
 
   function stdKey(b) { return [b.kx, b.ky, b.units, b.opt.cx, b.opt.cy, +!!b.opt.label, +!!b.opt.scoop, +!!b.opt.lip].join('-'); }
@@ -2382,18 +2413,20 @@
     return null;
   }
 
+  function capture(e) { try { cv.setPointerCapture(e.pointerId); } catch (err) { /* pointer already gone */ } }
+
   cv.addEventListener('pointerdown', function (e) {
     cv.focus();
     var p = toWorld(e), v = vt();
     var panTool = S.phase === 'capture' && S.capView === 'trace' && S.capTool === 'pan';
     if (S.phase === 'bins' && S.placing && e.button === 2) { rotatePlacing(1); return; }
     if (e.button === 1 || e.button === 2 || (S.space || panTool) && e.button === 0) { // pan
-      if (!in3d()) { S.drag = { pan: true, sx: e.clientX, sy: e.clientY, vx: v.x, vy: v.y }; v.fit = false; cv.setPointerCapture(e.pointerId); }
+      if (!in3d()) { S.drag = { pan: true, sx: e.clientX, sy: e.clientY, vx: v.x, vy: v.y }; v.fit = false; capture(e); }
       return;
     }
     if (in3d()) {
       var pv = shown3d();
-      if (pv) { S.drag = { orbit: pv, sx: e.clientX, sy: e.clientY, yaw: pv.yaw, pitch: pv.pitch }; cv.setPointerCapture(e.pointerId); }
+      if (pv) { S.drag = { orbit: pv, sx: e.clientX, sy: e.clientY, yaw: pv.yaw, pitch: pv.pitch }; capture(e); }
       return;
     }
     if (S.phase === 'capture' && S.capView === 'photo' && S.corners) {
@@ -2426,7 +2459,7 @@
             S.selNode = { loop: hitN.loop, k: hitN.k };
             S.drag = { node: hitN, moved: !!hitN.added };
             renderShapeList(); draw();
-            cv.setPointerCapture(e.pointerId);
+            capture(e);
             return;
           }
         }
@@ -2452,7 +2485,7 @@
         var hp = rotHandle(it);
         if (Math.hypot(hp[0] - p[0], hp[1] - p[1]) < 10 / v.s) {
           S.drag = { rotate: it, a0: Math.atan2(p[1] - it.y, p[0] - it.x), rot0: it.rot };
-          cv.setPointerCapture(e.pointerId);
+          capture(e);
           return;
         }
       }
@@ -2466,7 +2499,7 @@
     } else if (S.phase === 'bins') {
       if (!binsPointerDown(p, v, e)) return;
     } else return;
-    cv.setPointerCapture(e.pointerId);
+    capture(e);
   });
 
   cv.addEventListener('pointermove', function (e) {
@@ -2709,7 +2742,7 @@
       var sb = selBin();
       if (S.placing) {
         if (k === 'r') rotatePlacing(e.shiftKey ? -1 : 1);
-        else if (e.key === 'Escape') { S.placing = null; status('Stopped placing.'); draw(); }
+        else if (e.key === 'Escape') stopPlacing();
       } else if (sb && k === 'r') rotateBin(sb, e.shiftKey ? -1 : 1);
       else if (sb && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); removeBin(sb); }
       else if (e.key === 'Escape') { S.binSel = null; renderBins(); draw(); }

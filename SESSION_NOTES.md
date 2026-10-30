@@ -22,6 +22,7 @@
 - The user's previous session was very long (1,400+ messages). Compact early.
 
 ## Log
+- 2026-10-30: Fixes after the user's test: GitHub Pages served a stale app.js with the new page (crash) → `?v=` on scripts. Tool steps hidden unless editing, Bins toolbar (Rotate / Remove / Stop placing), per-tab status, empty tool bins discarded, tutorial returns to its start tab, Make splits tool bins to the bed. Scripted tests (28 + 13 checks) pass on the user's real github.io data; screenshots via headless Edge.
 - 2026-10-30: Bin designs separate from placement (project v4, v3 migrates), ghost placing, drag from list, rotation, Done ← Bins. Tested in the browser pane by script (pane hidden, no screenshots); not yet tried by the user.
 - 2026-10-29: Tutorial sample shapes never persist; tool bins left empty by them are removed. Pushed the suite to GitHub.
 - 2026-10-29: Recovered the user's 4 tools (from Edge storage of the github.io copy) into Downloads/tooltrace-recovered-tools.json. Storage is per origin: file:// and github.io copies don't share data.
