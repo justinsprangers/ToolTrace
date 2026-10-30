@@ -188,6 +188,49 @@
     <div class="btns"><button class="b primary" id="drNext">Next: baseplate →</button></div>
   </div>
 
+  <!-- 3. Bins: standard and tool bins placed on the drawer grid -->
+  <div class="panel" id="panel-bins" hidden>
+    <details class="sec" open data-key="bins"><summary>Bins</summary>
+      <ul class="tips">
+        <li>Drag across empty cells to add a standard bin.</li>
+        <li>Drag a bin to move it, its corner dot to resize. <kbd>Delete</kbd> removes it.</li>
+      </ul>
+      <div class="btns"><button class="b" id="binAddTool" title="A bin with pockets shaped like your tools (photo → trace → layout)">Add tool bin</button><button class="b" id="binFill">Fill empty cells</button><button class="b" id="binClear">Remove all</button></div>
+      <div id="binNewCtls"></div>
+      <div class="shapelist" id="binList"></div>
+      <div id="binInfo" class="info"></div>
+    </details>
+    <details class="sec" open id="binSel" hidden><summary id="binSelTitle">Selected bin</summary>
+      <div class="field"><label>Size (cells)</label><input type="number" id="binKx" min="1"><input type="number" id="binKy" min="1"></div>
+      <div class="field"><label>Height (7 mm units)</label><input type="number" id="binU" min="1"></div>
+      <div id="binStdOpts">
+        <div class="field"><label>Compartments across × deep</label><input type="number" id="binCx" min="1"><input type="number" id="binCy" min="1"></div>
+        <label class="check"><input type="checkbox" id="binLabel"> Label tab (along the back)</label>
+        <label class="check"><input type="checkbox" id="binScoop"> Finger scoop (front)</label>
+      </div>
+      <label class="check"><input type="checkbox" id="binLip"> Stacking lip</label>
+      <div class="btns"><button class="b primary" id="binEditTool">Edit tool layout →</button><button class="b" id="binDup">Duplicate</button><button class="b" id="binDel">Remove</button></div>
+      <div class="hint" id="binSelInfo"></div>
+    </details>
+  </div>
+
+  <!-- 4. Make: everything to print or cut, exports, checklist -->
+  <div class="panel" id="panel-make" hidden>
+    <details class="sec" open data-key="make"><summary>Everything to make</summary>
+      <div class="btns"><button class="b primary" id="mk3mf" title="Every print (baseplate and bins) packed onto build plates in one Bambu Studio file">Bambu 3MF (all plates)</button><button class="b" id="mkZip">All STLs (.zip)</button><button class="b" id="mkDxf">Laser DXF</button></div>
+      <div id="mkInfo" class="info"></div>
+      <ul class="tips">
+        <li>Make the <b>test</b> items first and check the fit.</li>
+        <li>Tick things off as you finish them; ticks are saved with the project.</li>
+        <li>Plates use <b>Max print size</b> (Baseplate tab) as the bed size.</li>
+      </ul>
+      <details class="more"><summary>Opening the 3MF</summary>
+        <p>Bambu Studio: File › Open project (or drag it in), then pick your printer and filament; each plate is ready to slice. If plates look wrong, use the STL zip and Arrange instead.</p>
+      </details>
+      <div id="mkList"></div>
+    </details>
+  </div>
+
   <div class="panel" id="panel-capture" hidden>
     <details class="sec" open data-key="photo"><summary>Photo</summary>
       <input type="file" id="file" accept="image/*">
@@ -485,7 +528,10 @@
 <script src="js/grid.js"></script>
 <script src="js/gridfinity.js"></script>
 <script src="js/baseplate.js"></script>
+<script src="js/zip.js"></script>
+<script src="js/make.js"></script>
 <script src="js/preview3d.js"></script>
+<script src="js/bins.js"></script>
 <script src="js/app.js"></script>
 <script src="js/tour.js"></script>
 </body>
