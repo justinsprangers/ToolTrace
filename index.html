@@ -19,6 +19,9 @@
   .phases button.on { background: var(--ink); color: #fff; border-color: var(--ink); }
   .phases button b { display: inline-block; width: 18px; height: 18px; line-height: 18px; border-radius: 50%; background: rgba(0,0,0,.08); font-size: 12px; text-align: center; margin-right: 6px; }
   .phases button.on b { background: rgba(255,255,255,.2); }
+  .phases.sub { align-items: center; padding-left: 10px; border-left: 1px solid var(--line); }
+  .phases.sub span { color: var(--mute); font-size: 12.5px; margin-right: 2px; }
+  .phases.sub button { padding: 3px 10px; font-size: 13px; }
   header .spacer { flex: 1; }
   main { display: grid; grid-template-columns: 370px 1fr; flex: 1; min-height: 0; }
   aside { overflow-y: auto; min-height: 0; border-right: 1px solid var(--line); background: var(--panel); padding: 4px 16px 40px; }
@@ -143,10 +146,16 @@
 <header>
   <h1>ToolTrace</h1>
   <div class="phases">
-    <button data-phase="capture" class="on"><b>1</b>Capture</button>
-    <button data-phase="layout"><b>2</b>Layout</button>
-    <button data-phase="generate"><b>3</b>Generate</button>
-    <button data-phase="baseplate" title="Ultralight Gridfinity baseplate for a drawer or shelf (separate from the bin steps)"><b>▦</b>Baseplate</button>
+    <button data-phase="drawer" class="on" title="Measure the drawer or space"><b>1</b>Drawer</button>
+    <button data-phase="baseplate" title="Printed ultralight or laser-cut baseplate"><b>2</b>Baseplate</button>
+    <button data-phase="bins" title="Plan the bins on the drawer grid"><b>3</b>Bins</button>
+    <button data-phase="make" title="Everything to print or cut"><b>4</b>Make</button>
+  </div>
+  <div class="phases sub" title="Steps for a bin with tool-shaped pockets">
+    <span id="toolBinName">Tool bin:</span>
+    <button data-phase="capture">Capture</button>
+    <button data-phase="layout">Layout</button>
+    <button data-phase="generate">Generate</button>
   </div>
   <div class="spacer"></div>
   <button class="b" id="tourBtn" title="A guided walk-through of the whole tool">Tutorial</button>
@@ -158,7 +167,28 @@
 <aside>
   <!-- 1. Capture: photo -> flattened image -> traced outlines -> library.
        Sections are <details class="sec">; their open/closed state is remembered (data-key). -->
-  <div class="panel" id="panel-capture">
+  <!-- 1. Drawer: the space to fill. Everything else in the project works from this. -->
+  <div class="panel" id="panel-drawer">
+    <details class="sec" open data-key="drawer"><summary>Drawer or space</summary>
+      <div class="field"><label>Name</label><input type="text" id="drName" placeholder="e.g. Workbench top drawer"></div>
+      <div class="field"><label>Inside width × depth</label><input type="number" id="bpW" min="1" step="any"><input type="number" id="bpD" min="1" step="any"></div>
+      <div class="field"><label>Inside height</label><input type="number" id="drH" min="1" step="any">
+        <select id="bpUnit" style="flex:0 0 58px"><option value="1">mm</option><option value="25.4">in</option></select></div>
+      <ul class="tips"><li>Measure inside, at the narrowest point (drawer slides and lips stick in).</li><li>Height: from the floor to whatever is above when the drawer closes.</li></ul>
+    </details>
+    <details class="sec" open data-key="drPlate"><summary>Baseplate</summary>
+      <div class="seg" id="drPlate">
+        <button data-mode="print">3D printed</button>
+        <button data-mode="laser">Laser-cut</button>
+        <button data-mode="none">None</button>
+      </div>
+      <ul class="tips"><li><b>3D printed</b>: ultralight pieces that fit your bed. <b>Laser-cut</b>: one sheet. <b>None</b>: bins sit loose.</li></ul>
+    </details>
+    <div id="drInfo" class="info"></div>
+    <div class="btns"><button class="b primary" id="drNext">Next: baseplate →</button></div>
+  </div>
+
+  <div class="panel" id="panel-capture" hidden>
     <details class="sec" open data-key="photo"><summary>Photo</summary>
       <input type="file" id="file" accept="image/*">
       <details class="more"><summary>Tips for a good photo</summary>
@@ -355,8 +385,7 @@
   <!-- Baseplate: an ultralight Gridfinity grid for an area, split into printable pieces -->
   <div class="panel" id="panel-baseplate" hidden>
     <details class="sec" open data-key="bpArea"><summary>Area to fill</summary>
-      <div class="field"><label>Width × depth</label><input type="number" id="bpW" min="1" step="any"><input type="number" id="bpD" min="1" step="any">
-        <select id="bpUnit" style="flex:0 0 58px"><option value="1">mm</option><option value="25.4">in</option></select></div>
+      <div class="hint" id="bpAreaNote"></div>
       <div class="seg" id="bpFill">
         <button data-mode="pad">Pad edges to fill</button>
         <button data-mode="gap">Leave gap</button>

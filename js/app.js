@@ -9,7 +9,7 @@
   var cv = $('cv'), ctx = cv.getContext('2d'), G = TT.GF;
 
   var S = {
-    phase: 'capture', capView: 'photo', capTool: 'pick', layTool: 'select',
+    phase: 'drawer', capView: 'photo', capTool: 'pick', layTool: 'select',
     photo: null, src: null, gray: null, corners: null, refMode: 'paper', gridFit: null,
     warp: null, warpCanvas: null, score: null, segMask: null, mask: null, overlay: null,
     shapes: [], strokes: [], stroke: null, libTick: {},
@@ -113,7 +113,8 @@
   }
 
   $('saveProject').onclick = function () {
-    download('tooltrace-project.json', JSON.stringify({ app: 'ToolTrace', version: 2, lib: S.lib, libOrder: S.libOrder, L: L }), 'application/json');
+    var name = (DR.name || 'tooltrace-project').replace(/[^\w.-]+/g, '_');
+    download(name + '.json', JSON.stringify({ app: 'ToolTrace', version: 3, lib: S.lib, libOrder: S.libOrder, L: L, project: PRJ }), 'application/json');
   };
   $('openProject').onclick = function () { $('projectFile').click(); };
   $('projectFile').onchange = function () {
@@ -122,7 +123,9 @@
     f.text().then(function (t) {
       var d = JSON.parse(t);
       if (S.libOrder.length && !confirm('Replace the current library and layout with this project?')) return;
-      load(d); save(); status('Opened ' + f.name + '.');
+      load(d); save();
+      if (d.project) { loadProject(d.project); projectLoaded(); }
+      status('Opened ' + f.name + '.');
     }).catch(function () { status('That file isn’t a ToolTrace project.', true); });
     this.value = '';
   };
@@ -142,10 +145,12 @@
   function setPhase(p) {
     S.phase = p;
     document.querySelectorAll('.phases button').forEach(function (b) { b.classList.toggle('on', b.dataset.phase === p); });
-    ['capture', 'layout', 'generate', 'baseplate'].forEach(function (k) { $('panel-' + k).hidden = k !== p; });
+    document.querySelectorAll('aside > .panel').forEach(function (el) { el.hidden = el.id !== 'panel-' + p; });
     if (p === 'layout') renderLib();
     if (p === 'generate' && !S.gen) $('genInfo').textContent = L.items.length ? 'Press Generate to build the model.' : 'Place some tools in Layout first.';
-    if (p === 'baseplate') { status('Baseplate: set the area and print size. In 3D, drag to turn and scroll to zoom.'); if (!S.bp) bpUpdate(); }
+    if (p === 'drawer') status('Drawer: measure the inside of the drawer or space, then pick a baseplate.');
+    if (p === 'baseplate') status('Baseplate: padding and print size. In 3D, drag to turn and scroll to zoom.');
+    if ((p === 'drawer' || p === 'baseplate') && !S.bp) bpUpdate();
     toolbar(); draw();
   }
 
@@ -1035,11 +1040,64 @@
     button('Pocket outline (SVG, 1:1)', function () { download(base + '_outline.svg', TT.svg(L, S.gen.fields), 'image/svg+xml'); });
   }
 
-  // ---------- Baseplate (on its own, not part of the bin steps) ----------
+  // ---------- Project: one drawer (space, baseplate, bins, checklist) ----------
 
-  // Settings in mm; `unit` only changes how the area is shown and typed. Saved per browser.
-  var BPS = { w: 500, d: 400, unit: 1, clearance: 0.5, fill: true, oneCorner: false, corner: 'rb', maxPrint: 180, minRows: 2, hole: 37.5, kerf: 0.15 };
-  try { Object.assign(BPS, JSON.parse(localStorage.getItem('tooltrace.baseplate') || '{}')); } catch (e) { /* ignore */ }
+  // All sizes in mm; drawer.unit only changes how sizes are shown and typed. Saved in localStorage
+  // (`tooltrace.project`) and in project files. bins: see the Bins tab; done: Make checklist ticks.
+  var DR = { name: '', w: 500, d: 400, h: 60, unit: 1, plate: 'print' };
+  var BPS = { clearance: 0.5, fill: true, oneCorner: false, corner: 'rb', maxPrint: 180, minRows: 2, hole: 37.5, kerf: 0.15 };
+  var PRJ = { drawer: DR, baseplate: BPS, bins: [], done: {} };
+  function loadProject(d) {
+    if (!d) return;
+    if (d.drawer) Object.assign(DR, d.drawer);
+    if (d.baseplate) Object.assign(BPS, d.baseplate);
+    PRJ.bins = d.bins || []; PRJ.done = d.done || {};
+  }
+  try {
+    var oldBp = JSON.parse(localStorage.getItem('tooltrace.baseplate') || 'null'); // before projects
+    if (oldBp) { Object.assign(BPS, oldBp); ['w', 'd', 'unit'].forEach(function (k) { if (oldBp[k]) DR[k] = oldBp[k]; }); delete BPS.w; delete BPS.d; delete BPS.unit; }
+    loadProject(JSON.parse(localStorage.getItem('tooltrace.project') || 'null'));
+    if (oldBp) saveProject();
+  } catch (e) { /* storage unavailable or corrupt */ }
+  function saveProject() {
+    try { localStorage.setItem('tooltrace.project', JSON.stringify(PRJ)); localStorage.removeItem('tooltrace.baseplate'); } catch (e) { /* storage unavailable */ }
+  }
+
+  function drInputs() {
+    $('drName').value = DR.name;
+    $('bpW').value = +(DR.w / DR.unit).toFixed(3); $('bpD').value = +(DR.d / DR.unit).toFixed(3); $('drH').value = +(DR.h / DR.unit).toFixed(3);
+    $('bpUnit').value = String(DR.unit);
+    $('drPlate').querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', b.dataset.mode === DR.plate); });
+  }
+  [['bpW', 'w'], ['bpD', 'd'], ['drH', 'h']].forEach(function (f) {
+    $(f[0]).oninput = function () {
+      var v = parseFloat(this.value);
+      if (v > 0) { DR[f[1]] = v * DR.unit; bpChanged(); }
+    };
+  });
+  $('drName').oninput = function () { DR.name = this.value; saveProject(); };
+  $('bpUnit').onchange = function () { DR.unit = +this.value; drInputs(); bpChanged(); };
+  segButtons('drPlate', function (m) { DR.plate = m; if (m === 'laser') S.bpView = 'laser'; bpChanged(); });
+  $('drNext').onclick = function () { setPhase('baseplate'); };
+
+  // Tallest bin (height units) that fits under the drawer's height, with 1 mm to spare. Bins
+  // stand on the drawer floor on the ultralight plate and on thin laser sheets.
+  function maxUnits(lip) { return Math.floor((DR.h - 1 - (lip ? TT.LIP_H || 4.4 : 0)) / G.unitH); }
+
+  function drawerInfo() {
+    var p = S.bp, P = TT.BP.pitch, lines = [];
+    if (!p) return;
+    if (p.error) { $('drInfo').innerHTML = '<span class="warn">' + esc(p.error) + '</span>'; return; }
+    lines.push('Grid: ' + p.nx + ' × ' + p.ny + ' cells (' + p.nx * p.ny + ') = ' + dims([p.nx * P, p.ny * P]));
+    lines.push('Leftover: ' + (DR.w - p.nx * P).toFixed(1) + ' mm across, ' + (DR.d - p.ny * P).toFixed(1) + ' mm deep');
+    var u = maxUnits(false), ul = maxUnits(true);
+    $('drInfo').innerHTML = esc(lines.join('\n')) + '\n' + (u < 1 ? '<span class="warn">Too shallow for a 1-unit (7 mm) bin.</span>'
+      : esc('Tallest bin: ' + u + ' units (' + u * G.unitH + ' mm)' + (ul >= 1 ? ', or ' + ul + ' with a stacking lip' : '')));
+    $('bpAreaNote').textContent = 'Area: ' + dims([DR.w, DR.d]) + ' (set in Drawer).';
+  }
+
+  // ---------- Baseplate ----------
+
   var BP_COLOURS = ['#ffd8a8', '#a5d8ff', '#b2f2bb', '#ffc9c9', '#d0bfff', '#fcc2d7', '#99e9f2', '#ffec99'];
   S.bpView = 'plan'; S.bp = null; S.bpPreview = null;
 
@@ -1062,34 +1120,34 @@
   };
 
   function bpInputs() {
-    $('bpW').value = +(BPS.w / BPS.unit).toFixed(3); $('bpD').value = +(BPS.d / BPS.unit).toFixed(3);
-    $('bpUnit').value = String(BPS.unit);
+    drInputs();
     $('bpFill').querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', (b.dataset.mode === 'pad') === BPS.fill); });
     $('bpAlign').querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', (b.dataset.mode === 'corner') === BPS.oneCorner); });
     $('bpCorner').value = BPS.corner; $('bpCornerRow').hidden = !BPS.oneCorner;
   }
   bpInputs();
-  ['w', 'd'].forEach(function (k) {
-    $(k === 'w' ? 'bpW' : 'bpD').oninput = function () {
-      var v = parseFloat(this.value);
-      if (v > 0) { BPS[k] = v * BPS.unit; bpChanged(); }
-    };
-  });
-  $('bpUnit').onchange = function () { BPS.unit = +this.value; bpInputs(); bpChanged(); };
   segButtons('bpFill', function (m) { BPS.fill = m === 'pad'; bpChanged(); });
   segButtons('bpAlign', function (m) { BPS.oneCorner = m === 'corner'; $('bpCornerRow').hidden = !BPS.oneCorner; bpChanged(); });
   $('bpCorner').onchange = function () { BPS.corner = this.value; bpChanged(); };
 
+  // After a project is opened: refresh every drawer/baseplate control and replan.
+  function projectLoaded() {
+    bpInputs();
+    C.bpClear.set(BPS.clearance); C.bpMax.set(BPS.maxPrint); C.bpMin.set(BPS.minRows); C.bpHole.set(BPS.hole); C.bpKerf.set(BPS.kerf);
+    saveProject(); bpUpdate();
+  }
+
   function bpChanged() {
-    try { localStorage.setItem('tooltrace.baseplate', JSON.stringify(BPS)); } catch (e) { /* storage unavailable */ }
+    saveProject();
     later('bp', bpUpdate, 200);
   }
 
   // Plan the pieces, build and check one mesh per distinct print, list the downloads.
   function bpUpdate() {
-    var p = S.bp = TT.bpPlan({ w: BPS.w, d: BPS.d, clearance: BPS.clearance, maxPrint: BPS.maxPrint, minRows: BPS.minRows, fill: BPS.fill,
+    var p = S.bp = TT.bpPlan({ w: DR.w, d: DR.d, clearance: BPS.clearance, maxPrint: BPS.maxPrint, minRows: BPS.minRows, fill: BPS.fill,
       corner: BPS.oneCorner ? BPS.corner : null });
     S.bpPreview = null; S.bpOrient = {};
+    drawerInfo();
     var box = $('bpDownloads');
     box.innerHTML = '';
     S.views.baseplate = { fit: true };
@@ -1148,6 +1206,32 @@
     }));
   }
 
+  // Drawer area (world mm, y down on screen) with its grid cells; returns the view for overlays.
+  function drawArea(dpr, cellFill) {
+    var p = S.bp, v = world(dpr), P = TT.BP.pitch, R = TT.BP.radius;
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, p.w, p.d);
+    ctx.strokeStyle = '#888'; ctx.lineWidth = 1 / v.s; ctx.setLineDash([6 / v.s, 4 / v.s]);
+    ctx.strokeRect(0, 0, p.w, p.d); ctx.setLineDash([]);
+    if (p.error) return v;
+    ctx.beginPath();
+    for (var j = 0; j < p.ny; j++) for (var i = 0; i < p.nx; i++) roundRectPath(p.grid[0] + i * P, p.d - p.grid[1] - (j + 1) * P, P, P, R);
+    ctx.fillStyle = cellFill; ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1 / v.s; ctx.stroke();
+    return v;
+  }
+
+  function drawDrawer(dpr) {
+    var p = S.bp;
+    if (!p) { message(dpr, 'Enter the drawer size.'); return; }
+    var v = drawArea(dpr, '#eef2f6');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#555'; ctx.font = '12px system-ui'; ctx.textAlign = 'center';
+    ctx.fillText((DR.name ? DR.name + ': ' : '') + dims([p.w, p.d, DR.h]) + (p.error ? '' : ' · ' + p.nx + ' × ' + p.ny + ' cells'), (p.w / 2) * v.s + v.x, v.y - 6);
+    ctx.textAlign = 'start';
+    if (p.error) message(dpr, p.error);
+    drawRuler();
+  }
+
   function drawBaseplate(dpr, cw, ch) {
     var p = S.bp;
     if (!p) { message(dpr, 'Enter the area to fill.'); return; }
@@ -1204,7 +1288,7 @@
     if (S.phase === 'capture' && S.capView === 'photo') return S.src ? [0, 0, S.src.width, S.src.height] : null;
     if (S.phase === 'capture') return S.warp ? [S.warp.ox, S.warp.oy, S.warp.ox + S.warp.w * S.warp.res, S.warp.oy + S.warp.h * S.warp.res] : null;
     if (S.phase === 'layout') return [-5, -5, TT.binSize(L.nx) + 5, TT.binSize(L.ny) + 5];
-    if (S.phase === 'baseplate' && S.bp) return [-8, -24, S.bp.w + 8, S.bp.d + 8];
+    if (/^(drawer|baseplate|bins)$/.test(S.phase) && S.bp) return [-8, -24, S.bp.w + 8, S.bp.d + 8];
     return null;
   }
 
@@ -1244,6 +1328,7 @@
     else if (S.phase === 'capture') drawTrace(dpr);
     else if (S.phase === 'layout') drawLayout(dpr);
     else if (S.phase === 'baseplate') drawBaseplate(dpr, cw, ch);
+    else if (S.phase === 'drawer') drawDrawer(dpr);
     else drawModel(dpr, cw, ch);
   }
   window.addEventListener('resize', draw);
@@ -1832,10 +1917,10 @@
   // ---------- Start ----------
 
   try { var stored = localStorage.getItem('tooltrace.v2'); if (stored) load(JSON.parse(stored)); } catch (e) { /* storage unavailable or corrupt */ }
-  syncLayoutInputs(); renderLib(); describeLayout(); layoutSnapshot(); toolbar(); draw();
+  syncLayoutInputs(); renderLib(); describeLayout(); layoutSnapshot(); setPhase('drawer');
   TT.app = {
     S: S, L: L, C: C, runFrom: runFrom, setPhase: setPhase, addItem: addItem, generate: generate, fitGrid: fitGrid,
-    selectShape: selectShape, draw: draw, BPS: BPS, bpUpdate: bpUpdate,
+    selectShape: selectShape, draw: draw, BPS: BPS, DR: DR, PRJ: PRJ, bpUpdate: bpUpdate,
     // For the tutorial: copy the bin, and put a copy back (also removes library shapes by id).
     layoutState: function () { return JSON.parse(JSON.stringify(L)); },
     restore: function (state, dropIds) {
