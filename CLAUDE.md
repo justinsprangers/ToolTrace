@@ -1,10 +1,14 @@
 # CLAUDE.md: ToolTrace
 
-Offline page: photos of tools → traced outlines (library) → Gridfinity bin layout → STL. User docs are in [README.md](README.md); keep it current when controls or output change.
+Offline Gridfinity drawer suite: Drawer → Baseplate → Bins → Make, plus the tool-bin steps (photos of tools → traced outlines (library) → bin layout → STL). User docs are in [README.md](README.md); keep it current when controls or output change.
 
 ## Rules
 - **No build step, no dependencies, works from `file://`.** Plain `<script>` files sharing the global `TT`; no ES modules, `fetch`, or CDN libraries.
-- Three phases, kept separate: Capture (`S.*` in app.js, per photo, not saved) produces shapes; the library (`S.lib`) and layout (`L`) are saved to localStorage (`tooltrace.v2`) and project files. Don't put photo data in the library.
+- **Project = one drawer** (`PRJ` in app.js: `drawer` DR, `baseplate` BPS, `bins`, `done`, `cur`), saved to localStorage `tooltrace.project` and in project files (version 3, key `project`). Old `tooltrace.baseplate` storage and version 2 files migrate.
+- **Tool bins:** each bin `{kind: 'tool', layout}` keeps a copy of `L`. The one being edited is `S.curBin` (`PRJ.cur`); `save()` → `syncToolBin()` copies `L` back (and creates a tool bin when the first tool is placed with none open). `openToolBin` swaps a layout into `L`; `withLayout` builds another bin's meshes temporarily. The tutorial sets `TT.tourOpen`, which pauses syncing so its temporary bin never lands in the drawer.
+- **Bins grid:** bin x, y are cell column / row from the front-left (plan y up); the canvas is y down, so draw at `d - y`. `binProblems` flags overlap, outside grid, too tall (`units × 7 + LIP_H` > drawer height − 1) and empty tool bins.
+- **Make:** `buildMake` rows (test → plate → bins; identical standard bins merged), `TT.packPlates` shelf packing on a square bed of `BPS.maxPrint`, `TT.bambu3mf` mirrors a Bambu Studio 2.1 project: one `3D/Objects/object_N.model` per print wrapped by a component object, build items offset onto Bambu's plate grid (ceil(√n) columns, 1.2 × bed apart, rows toward −y), `Metadata/model_settings.config` with `<plate>`/`model_instance`. No project_settings.config (Bambu uses the current presets). **Not yet confirmed in Bambu Studio.** `TT.zip` deflates with CompressionStream.
+- Tool-bin phases, kept separate: Capture (`S.*` in app.js, per photo, not saved) produces shapes; the library (`S.lib`) and layout (`L`) are saved to localStorage (`tooltrace.v2`) and project files. Don't put photo data in the library.
 - Coordinates: photo = image px (y down); paper = mm (y down); library shapes = mm centred on their centroid (y down); layout = mm from the bin's top-left seen from above (y down). Meshes flip y (`H - y`) so the top view isn't mirrored.
 - Capture pipeline stages (`runFrom`): warp → score → seg → edit → extract; each stage reuses the cached result of the one before. Fix strokes and picked-out shapes are stored as paper-mm points so they survive re-tracing.
 - Fix tools: Brush keep / erase only (keys B/E, LaserEngraver colours, brush size in screen px, `[`/`]`, Ctrl+Z/Y). Smart keep/remove were removed at the user's request (node editing made them redundant).

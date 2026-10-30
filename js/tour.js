@@ -67,8 +67,23 @@ var TT = window.TT = window.TT || {};
 
   var STEPS = [
     { title: 'Welcome to ToolTrace', html:
-      '<p>Make a Gridfinity bin with a pocket shaped like each of your tools, in three steps:</p>' +
-      '<ol><li><b>Capture</b>: trace tools from a photo</li><li><b>Layout</b>: arrange them in a bin</li><li><b>Generate</b>: download the STL</li></ol>' +
+      '<p>Fit any drawer or shelf with Gridfinity, start to finish:</p>' +
+      '<ol><li><b>Drawer</b>: measure the space</li><li><b>Baseplate</b>: printed or laser-cut</li><li><b>Bins</b>: plan them on the grid</li><li><b>Make</b>: everything to print or cut</li></ol>' +
+      '<p>Bins with pockets shaped like your tools use the <b>Tool bin</b> steps: Capture, Layout, Generate.</p>', phase: 'drawer' },
+    { target: 'details[data-key=drawer]', title: '1. Drawer', html:
+      '<ul><li>Inside width, depth and height, at the narrowest point.</li><li>The picture shows how many 42 mm cells fit.</li></ul>', phase: 'drawer' },
+    { target: '#drPlate', title: 'Baseplate type', html:
+      '<ul><li><b>3D printed</b>: ultralight pieces sized for your bed.</li><li><b>Laser-cut</b>: one sheet with a hole per cell.</li><li><b>None</b>: bins sit loose.</li></ul>', phase: 'drawer' },
+    { target: 'details[data-key=bpArea]', title: '2. Baseplate', html:
+      '<ul><li><b>Pad edges</b> fills the drawer exactly; <b>one corner</b> keeps more pieces standard.</li><li><b>Max print size</b> is your bed size.</li><li>Print the <b>test piece</b> first.</li></ul>', phase: 'baseplate' },
+    { target: 'details[data-key=bins]', title: '3. Bins', html:
+      '<ul><li>Drag across empty cells to add a bin; <b>Fill empty cells</b> does the rest.</li><li>Click a bin for compartments, label tab, scoop and stacking lip.</li><li>Bins too tall for the drawer turn red.</li></ul>', phase: 'bins' },
+    { target: 'details[data-key=make]', title: '4. Make', wait: 2000, html:
+      '<ul><li>Test pieces first, then the baseplate and bins, with counts.</li><li><b>Bambu 3MF</b>: every print on plates in one file. Or a zip of STLs.</li><li>Tick things off as you finish them.</li></ul>', phase: 'make' },
+    { title: 'Tool bins', html:
+      '<p>A bin with a pocket shaped like each tool, in three steps:</p>' +
+      '<ol><li><b>Capture</b>: trace tools from a photo</li><li><b>Layout</b>: arrange them in a bin</li><li><b>Generate</b>: check the model</li></ol>' +
+      '<p class="tour-note">In Bins, <b>Add tool bin</b> starts one; it then shows on the drawer grid.</p>' +
       '<div class="tour-acts"><button class="b primary" data-act="sample">Try it with a sample photo</button><button class="b" data-act="next">Use my own photo</button></div>',
       phase: 'capture', noNext: true },
     { target: 'details[data-key=photo]', title: 'Choose a photo', html:
@@ -115,7 +130,7 @@ var TT = window.TT = window.TT || {};
     { target: 'details[data-key=dl]', title: 'Download', html:
       '<ul><li>One STL per printable piece, sizes in mm and inches.</li><li>Also a 1:1 SVG of the pockets (for laser-cut foam).</li></ul>', phase: 'generate' },
     { title: 'You’re set', html:
-      '<ul><li><b>Save project</b> backs up your library and layout.</li><li>Press <kbd>?</kbd> for every keyboard shortcut.</li><li><b>Tutorial</b> (top right) replays this tour.</li></ul>' +
+      '<ul><li><b>Save project</b> backs up the whole drawer: size, baseplate, bins, tool library and checklist.</li><li>Press <kbd>?</kbd> for every keyboard shortcut.</li><li><b>Tutorial</b> (top right) replays this tour.</li></ul>' +
       '<p class="tour-note">Your own bin comes back when the tour ends' + '<span id="tourSampleNote" hidden>, and the sample tools are removed from the library</span>.</p>' }
   ];
 

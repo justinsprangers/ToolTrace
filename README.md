@@ -1,10 +1,29 @@
 # ToolTrace
 
-Turn photos of your tools into Gridfinity bins with a pocket shaped like each tool. Works offline: double-click `index.html`. Nothing to install.
+Fit any drawer or shelf with Gridfinity, start to finish: measure the space, make the baseplate (printed or laser-cut), plan standard bins and bins with pockets shaped like your tools, then get everything to print or cut. Works offline: double-click `index.html`. Nothing to install.
 
-It works in three steps (tabs at the top). A fourth tab, **Baseplate**, makes an ultralight Gridfinity baseplate for a drawer (see below). New to it? Press **Tutorial** (top right; it also opens by itself the first time). It walks through every step, and can load a built-in sample photo so you can try everything without a photo of your own. Arrow keys or Enter go forward and back, and Esc ends it.
+Tabs at the top: **1 Drawer → 2 Baseplate → 3 Bins → 4 Make**. Bins with tool-shaped pockets have their own steps, **Tool bin: Capture · Layout · Generate**. New to it? Press **Tutorial** (top right; it also opens by itself the first time). It walks through every step and can load a built-in sample photo. Arrow keys or Enter go forward and back, and Esc ends it.
 
-## 1. Capture: photo → outlines
+One project = one drawer. It's saved in your browser automatically; **Save project / Open project** back it up or move it (drawer, baseplate, bins, tool library and checklist in one `.json` file). Older project files open as a tool bin in the current drawer.
+
+## Drawer
+- **Inside width × depth × height** (mm or inches), measured at the narrowest point. Height is from the floor to whatever is above when the drawer closes.
+- **Baseplate:** **3D printed** (ultralight pieces), **Laser-cut** (one sheet), or **None**.
+- The info box shows the grid (whole 42 mm cells), the leftover space and the tallest bin that fits (7 mm units; a stacking lip adds 4.4 mm).
+
+## Bins
+- Drag across empty cells to add a standard bin. Drag a bin to move it and its corner dot to resize it. **Delete** removes the selected bin. **Fill empty cells** packs every gap with bins up to the size you set, biggest first.
+- Click a bin to set its **size**, **height** (7 mm units), **compartments** (across × deep), **label tab** (along the back, 45° underside so it prints without support), **finger scoop** (curved front) and **stacking lip**.
+- **Add tool bin** opens the Tool bin steps below for a new bin; its size comes from its layout. Select a tool bin and press **Edit tool layout** to go back to it. The header shows which tool bin you're editing.
+- Red outlines: the bin overlaps another, sits outside the grid, is taller than the drawer, or is a tool bin with no tools yet.
+
+## Make
+- One list of everything: **test** items first (baseplate test piece or laser hole-size strip), then the **baseplate**, then the **bins**, with how many of each. Identical bins are listed once with a count.
+- **Bambu 3MF (all plates):** every print packed onto build plates (bed size = **Max print size** on the Baseplate tab) in one Bambu Studio file. Open it, pick your printer and filament, and slice each plate. If the plates look wrong in your version of Bambu Studio, use **All STLs (.zip)** and Arrange instead.
+- **All STLs (.zip):** every file, named with how many to print. **Laser DXF** for a laser-cut plate.
+- Tick items off as you finish them; ticks are saved with the project. The filament figure is the solid volume, so it's an upper bound; the slicer gives the real number.
+
+## Tool bin 1. Capture: photo → outlines
 1. **Photo:** choose a photo of one or more tools lying flat.
 2. **Scale reference:** pick one.
    - **Paper** (most reliable): tools on plain white paper. The app finds the paper corners. Drag the handles if they're off.
@@ -42,7 +61,7 @@ Sliders show their default as a small blue tick; ↺ next to a changed slider pu
 
 Press **?** (or **Shortcuts** above the picture) for every keyboard shortcut.
 
-## 2. Layout: shapes → bin
+## Tool bin 2. Layout: shapes → bin
 - **Add** a library shape to put it in the bin. ✕ deletes one shape straight away (with **Undo** in the status bar); tick several (or **All**) and press **Delete ticked** to remove many with one confirmation.
 - Drag it to move it, and drag the round handle to rotate (hold Shift to snap to 15°).
 - Keys: arrow keys nudge it (Shift for bigger steps), R rotates 90°, Ctrl+D duplicates, Delete removes it, Ctrl+Z / Ctrl+Y undo and redo.
@@ -56,16 +75,16 @@ Press **?** (or **Shortcuts** above the picture) for every keyboard shortcut.
 - **Bin:** **Clearance** is the gap around every tool (1 mm is a good start), and **Min wall** is the minimum material left at the bin edge. With **Fit bin to the tools automatically** on, the bin size follows the tools. Turn it off to set the units yourself.
 - The library and layout are saved in your browser automatically. Use **Save project / Open project** (top right) to back them up or move them to another computer.
 
-## 3. Generate: bin → STL
+## Tool bin 3. Generate: bin → STL
 - **Height** comes from the deepest pocket plus the **Min floor**, or set it yourself.
 - **Pocket edge chamfer:** a 45° bevel around the top of every pocket so tools drop in easily (default 1 mm; 0 turns it off). It's printed as ~0.2 mm steps and is always kept shallower than the shallowest pocket.
 - **Max units per print:** 6 fits a 256 mm bed. Wider bins are split at grid lines into pieces; each piece is a normal bin and the pocket runs across the join.
 - **Generate model** builds the mesh, checks that every body is closed, and shows a 3D preview (drag to turn, scroll to zoom).
 - **Download** one STL per piece, plus a 1:1 SVG of the pocket outlines (e.g. for laser-cut foam).
 
-## Baseplate: an ultralight Gridfinity grid for a drawer
-The **Baseplate** tab (top bar) is separate from the bin steps. It fills an area with a lightweight Gridfinity baseplate, split into pieces that fit your printer.
-- **Width × depth:** the area to fill (mm or inches). Only whole 42 mm cells are used, centred in the area.
+## Baseplate: an ultralight Gridfinity grid for the drawer
+Fills the drawer with a lightweight Gridfinity baseplate, split into pieces that fit your printer, or makes a laser-cut sheet.
+- The area comes from the **Drawer** tab. Only whole 42 mm cells are used.
 - **Pad edges to fill** gives the outer pieces a frame (an outer wall tied to the grid by a rib on each grid line) so the plate fills the area exactly. **Leave gap** leaves the leftover space empty. **Fit clearance** is the total slack left so the plate drops in (0.5 mm default).
 - **Leftover split evenly** centres the grid. **Leftover in one corner** puts all the padding (or gap) at the corner you pick (front = bottom of the plan), so the other edges are plain cells and more pieces are the same standard print.
 - **Max print size:** the largest piece your bed takes (A1 mini 180 mm; A1, P1S, X1C 256 mm). Padding counts toward it.
@@ -78,9 +97,10 @@ The **Baseplate** tab (top bar) is separate from the bin steps. It fills an area
 
 ## What the bins are
 - Standard Gridfinity: 42 mm grid, 41.5 mm bins, 7 mm height units, and the standard 0.8 / 1.8 / 2.15 mm base profile on every cell.
-- Pockets have straight walls with a chamfered top edge. Each tool can have its own depth, and where pockets overlap the deeper one wins.
-- No stacking lip and no magnet holes (yet). The top is flat.
-- Each STL is several overlapping closed bodies (feet, base, one layer per pocket depth). Slicers merge them when slicing.
+- Standard bins: 1.2 mm walls and floor, 1.2 mm compartment walls.
+- Tool bins: pockets have straight walls with a chamfered top edge. Each tool can have its own depth, and where pockets overlap the deeper one wins.
+- Stacking lip (optional, on both kinds): the Gridfinity spec profile (0.7 / 1.8 / 1.9 mm), 4.4 mm above the bin's top. No magnet holes (yet).
+- Each STL is several overlapping closed bodies (feet, base, walls, ...). Slicers merge them when slicing.
 
 ## Accuracy tips
 - Shoot straight down from high up with 2–3× zoom. Close wide-angle shots make tall parts look bigger.
@@ -92,7 +112,9 @@ The **Baseplate** tab (top bar) is separate from the bin steps. It fills an area
 - `js/vision.js`: perspective correction, tracing, distance transforms, contours, outline smoothing.
 - `js/grid.js`: cutting-mat grid detection and fitting.
 - `js/gridfinity.js`: pocket fields, bin geometry, mesh, STL/SVG export.
-- `js/baseplate.js`: ultralight baseplate planning (pieces) and mesh.
+- `js/baseplate.js`: ultralight baseplate planning (pieces) and mesh, laser sheet and DXF.
+- `js/bins.js`: standard bins (compartments, label tab, scoop, lip).
+- `js/make.js`: plate packing and the Bambu Studio 3MF. `js/zip.js`: zip writer.
 - `js/preview3d.js`: 3D preview (software z-buffer).
 - `js/earcut.js`: polygon triangulation (port of mapbox/earcut, ISC license).
 - `js/app.js`: the UI.

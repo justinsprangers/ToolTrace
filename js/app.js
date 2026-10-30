@@ -123,9 +123,15 @@
     if (!f) return;
     f.text().then(function (t) {
       var d = JSON.parse(t);
-      if (S.libOrder.length && !confirm('Replace the current library and layout with this project?')) return;
-      // A version 3 file replaces the drawer; an older one adds its layout as a new tool bin.
-      if (d.project) { loadProject(d.project); S.curBin = PRJ.cur || null; } else S.curBin = null;
+      if (d.project && (S.libOrder.length || PRJ.bins.length) && !confirm('Replace the current drawer, bins and library with this project?')) return;
+      // A version 3 file replaces the drawer; an older one adds its layout as a new tool bin and
+      // its shapes to the library (so the drawer's other tool bins keep theirs).
+      if (d.project) { loadProject(d.project); S.curBin = PRJ.cur || null; }
+      else {
+        S.curBin = null;
+        d.lib = Object.assign({}, S.lib, d.lib || {});
+        d.libOrder = S.libOrder.concat((d.libOrder || []).filter(function (id) { return S.libOrder.indexOf(id) < 0; }));
+      }
       load(d); save();
       if (d.project) projectLoaded();
       toolBinLabel();
@@ -1269,6 +1275,7 @@
 
   // Copy the layout being edited into its tool bin (making one when the first tool is placed).
   function syncToolBin() {
+    if (TT.tourOpen) return; // the tutorial works on its own temporary bin
     var b = binById(S.curBin);
     if (!b) {
       if (!L.items.length || !S.bp || S.bp.error) return;
