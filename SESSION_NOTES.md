@@ -22,6 +22,8 @@
 - The user's previous session was very long (1,400+ messages). Compact early.
 
 ## Log
+- 2026-10-29: Tutorial sample shapes never persist; tool bins left empty by them are removed. Pushed the suite to GitHub.
+- 2026-10-29: Recovered the user's 4 tools (from Edge storage of the github.io copy) into Downloads/tooltrace-recovered-tools.json. Storage is per origin: file:// and github.io copies don't share data.
 - 2026-10-29: Suite: Drawer tab and project model, standard bins + lip, Bins editor, Make tab (3MF, zip, checklist), docs and tutorial
 - 2026-10-29: Baseplate: test piece (2x2 corner STL) and laser hole-size test strip
 - 2026-10-27: Baseplate: laser-cut DXF of the whole area (hole per cell, kerf)

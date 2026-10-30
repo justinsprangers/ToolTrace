@@ -106,7 +106,10 @@
   }
 
   function load(data) {
-    S.lib = data.lib || {}; S.libOrder = (data.libOrder || Object.keys(S.lib)).filter(function (id) { return S.lib[id]; });
+    S.lib = data.lib || {};
+    // Tutorial sample shapes never outlive the tutorial (e.g. the page was closed mid-tour).
+    Object.keys(S.lib).forEach(function (id) { if (S.lib[id].sample) delete S.lib[id]; });
+    S.libOrder = (data.libOrder || Object.keys(S.lib)).filter(function (id) { return S.lib[id]; });
     if (data.L) Object.keys(data.L).forEach(function (k) { L[k] = data.L[k]; });
     L.items = L.items.filter(function (it) { return S.lib[it.shapeId]; });
     S.sel = null; S.gen = null;
@@ -134,7 +137,7 @@
       }
       load(d); save();
       if (d.project) projectLoaded();
-      toolBinLabel();
+      cleanToolBins(); toolBinLabel();
       status('Opened ' + f.name + '.');
     }).catch(function () { status('That file isn’t a ToolTrace project.', true); });
     this.value = '';
@@ -652,6 +655,7 @@
       S.lib[id] = { id: id, name: nameOf(sh), loops: loops, depth: depth, w: b[2] - b[0], h: b[3] - b[1] };
       // Mirror axis (shape coordinates), used for symmetric finger notches in Layout.
       if (sym) S.lib[id].axis = { p: [+(sym.p[0] - cx).toFixed(3), +(sym.p[1] - cy).toFixed(3)], a: sym.a };
+      if (TT.tourOpen && TT.tourSample) S.lib[id].sample = true; // tutorial only: cleared on load
       S.libOrder.push(id);
     });
     save(); renderLib();
@@ -1316,6 +1320,21 @@
       S.sel = null; syncLayoutInputs(); invalidate(); describeLayout(); save(); toolBinLabel();
     }
     binsChanged();
+  }
+
+  // Tool bins lose tools whose shape left the library; a bin that had tools and lost them all
+  // (e.g. tutorial samples) is removed. Bins made empty on purpose stay.
+  function cleanToolBins() {
+    PRJ.bins.slice().forEach(function (b) {
+      if (b.kind !== 'tool' || !b.layout || !b.layout.items || !b.layout.items.length) return;
+      var keep = b.layout.items.filter(function (it) { return S.lib[it.shapeId]; }), ids = {};
+      if (keep.length === b.layout.items.length) return;
+      if (!keep.length) { removeBin(b); return; }
+      keep.forEach(function (it) { ids[it.uid] = 1; });
+      b.layout.items = keep;
+      b.layout.notches = (b.layout.notches || []).filter(function (n) { return !n.item || ids[n.item]; });
+    });
+    saveProject();
   }
 
   function binsChanged() { S.make = null; saveProject(); renderBins(); draw(); }
@@ -2458,7 +2477,8 @@
 
   try { var stored = localStorage.getItem('tooltrace.v2'); if (stored) load(JSON.parse(stored)); } catch (e) { /* storage unavailable or corrupt */ }
   syncLayoutInputs(); renderLib(); describeLayout(); layoutSnapshot(); setPhase('drawer');
-  syncToolBin(); // older data: the layout in L becomes the drawer's first tool bin
+  cleanToolBins();
+  save(); // also syncs: older data's layout in L becomes the drawer's first tool bin
   TT.app = {
     S: S, L: L, C: C, runFrom: runFrom, setPhase: setPhase, addItem: addItem, generate: generate, fitGrid: fitGrid,
     selectShape: selectShape, draw: draw, BPS: BPS, DR: DR, PRJ: PRJ, bpUpdate: bpUpdate, openToolBin: openToolBin, newBin: newBin, binsChanged: binsChanged, renderMake: renderMake,

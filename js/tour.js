@@ -176,7 +176,7 @@ var TT = window.TT = window.TT || {};
   }
 
   function loadSample() {
-    usedSample = true;
+    usedSample = true; TT.tourSample = true;
     q('#refMode [data-mode=paper]').click();
     $('paperSize').value = '215.9x279.4';
     A().S.edits = [];
@@ -265,6 +265,7 @@ var TT = window.TT = window.TT || {};
       A().restore(saved.layout, usedSample ? tourIds() : []);
       saved = null;
     }
+    TT.tourSample = false;
     try { localStorage.setItem('tooltrace.tourDone', '1'); } catch (e) { /* ignore */ }
   }
 
