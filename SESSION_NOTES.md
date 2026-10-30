@@ -20,6 +20,7 @@
 - The user's previous session was very long (1,400+ messages). Compact early.
 
 ## Log
+- 2026-10-29: Baseplate: test piece (2x2 corner STL) and laser hole-size test strip
 - 2026-10-27: Baseplate: laser-cut DXF of the whole area (hole per cell, kerf)
 - 2026-10-26: Baseplate: leftover split evenly or all in one corner (more standard pieces)
 - 2026-10-26: Baseplate tab (ultralight Gridfinity baseplate generator)

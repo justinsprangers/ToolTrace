@@ -129,6 +129,24 @@ var TT = window.TT = window.TT || {};
     return { outline: outline, holes: holes, box: [x0, y0, x1, y1], w: x1 - x0, h: y1 - y0, web: P - o.hole };
   };
 
+  // Hole-size test strip: 5 holes in a row at hole − 0.4 … hole + 0.4 mm, with 1–5 small marker
+  // holes under each so the sizes can be told apart after cutting.
+  TT.bpLaserTest = function (hole, kerf) {
+    var P = B.pitch, k2 = kerf / 2, base = 8, sizes = [-0.4, -0.2, 0, 0.2, 0.4].map(function (d) { return +(hole + d).toFixed(2); });
+    var holes = [];
+    sizes.forEach(function (h, i) {
+      var s = h - kerf, r = Math.max(0.3, 1.6 + (h - 37.2) / 2 - k2), cx = (i + 0.5) * P, cy = base + P / 2;
+      holes.push(roundRectPts(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2, Math.min(r, s / 2), 6).reverse());
+      for (var m = 0; m <= i; m++) {
+        var mx = cx + (m - i / 2) * 3, mr = 0.75 - k2, dot = [];
+        for (var a = 0; a < 12; a++) dot.push([mx + mr * Math.cos(-a * Math.PI / 6), base / 2 + mr * Math.sin(-a * Math.PI / 6)]);
+        holes.push(dot);
+      }
+    });
+    var w = sizes.length * P, h = base + P;
+    return { outline: roundRectPts(-k2, -k2, w + k2, h + k2, B.radius + k2, 8), holes: holes, box: [0, 0, w, h], w: w, h: h, sizes: sizes };
+  };
+
   // DXF R12 in mm (same style as LaserBoxes): closed POLYLINEs on layer CUT, sheet corner at 0, 0.
   TT.bpDxf = function (L, note) {
     var o = [], f = function (v) { return (Math.round(v * 1000) / 1000).toString(); };

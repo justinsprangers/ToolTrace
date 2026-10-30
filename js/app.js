@@ -1049,6 +1049,11 @@
   ctl('bpLaserCtls', 'bpHole', 'Hole size', 36, 40, 0.1, 37.5, 'mm', function (v) { BPS.hole = v; bpChanged(); });
   ctl('bpLaserCtls', 'bpKerf', 'Kerf', 0, 0.5, 0.01, 0.15, 'mm', function (v) { BPS.kerf = Math.max(0, v); bpChanged(); });
   C.bpClear.set(BPS.clearance); C.bpMax.set(BPS.maxPrint); C.bpMin.set(BPS.minRows); C.bpHole.set(BPS.hole); C.bpKerf.set(BPS.kerf);
+  $('bpDxfTest').onclick = function () {
+    var T = TT.bpLaserTest(BPS.hole, BPS.kerf);
+    download('baseplate_hole_test_' + T.sizes[0] + '-' + T.sizes[4] + 'mm.dxf', TT.bpDxf(T, 'ToolTrace hole-size test: ' + T.sizes.join(', ') + ' mm, kerf ' + BPS.kerf), 'application/dxf');
+    $('bpLaserInfo').innerHTML = esc('Test strip holes, left to right (1–5 dots): ' + T.sizes.join(', ') + ' mm. Set Hole size to the one that fits best.');
+  };
   $('bpDxf').onclick = function () {
     var p = S.bp;
     if (!p || p.error || !S.bpLaser) return;
@@ -1120,6 +1125,14 @@
     p.types.forEach(function (t) {
       button(t.label + ': ' + t.kx + ' × ' + t.ky + ' cells · ' + t.w.toFixed(1) + ' × ' + t.h.toFixed(1) + ' mm · print ' + t.count + '×',
         function () { download(name(t), TT.stl(t.mesh.shells), 'model/stl'); }, p.types.length === 1);
+    });
+    // Test piece: 2 × 2 cells from the corner with the most padding, to check the fit first.
+    var corners = [[0, 1], [2, 1], [0, 3], [2, 3]], best = corners[0];
+    corners.forEach(function (c) { if (p.pad[c[0]] + p.pad[c[1]] > p.pad[best[0]] + p.pad[best[1]]) best = c; });
+    var tp = { kx: Math.min(2, p.nx), ky: Math.min(2, p.ny), pad: [0, 0, 0, 0] };
+    tp.pad[best[0]] = p.pad[best[0]]; tp.pad[best[1]] = p.pad[best[1]];
+    button('Test piece: ' + tp.kx + ' × ' + tp.ky + (tp.pad.some(Boolean) ? ' padded corner' : '') + ' (print this first)', function () {
+      download('baseplate_test_' + tp.kx + 'x' + tp.ky + '.stl', TT.stl(TT.bpMesh(tp).shells), 'model/stl');
     });
     bpPreview(); draw();
   }
