@@ -4,7 +4,7 @@ Fit any drawer or shelf with Gridfinity, start to finish: measure the space, mak
 
 Tabs at the top: **1 Drawer → 2 Baseplate → 3 Bins → 4 Make**. Bins with tool-shaped pockets have their own steps, **Tool bin: Capture · Layout · Generate**. New to it? Press **Tutorial** (top right; it also opens by itself the first time). It walks through every step and can load a built-in sample photo. Arrow keys or Enter go forward and back, and Esc ends it.
 
-One project = one drawer. It's saved in your browser automatically; **Save project / Open project** back it up or move it (drawer, baseplate, bins, tool library and checklist in one `.json` file). Older project files open as a tool bin in the current drawer.
+One project = one drawer. It's saved in your browser automatically; **Save project / Open project** back it up or move it (drawer, baseplate, bins, tool library and checklist in one `.json` file). Older project files open as a tool bin design in the current drawer; drawers saved before bin designs existed turn each bin into a design plus one placed copy.
 
 ## Drawer
 - **Inside width × depth × height** (mm or inches), measured at the narrowest point. Height is from the floor to whatever is above when the drawer closes.
@@ -12,10 +12,12 @@ One project = one drawer. It's saved in your browser automatically; **Save proje
 - The info box shows the grid (whole 42 mm cells), the leftover space and the tallest bin that fits (7 mm units; a stacking lip adds 4.4 mm).
 
 ## Bins
-- Drag across empty cells to add a standard bin. Drag a bin to move it and its corner dot to resize it. **Delete** removes the selected bin. **Fill empty cells** packs every gap with bins up to the size you set, biggest first.
-- Click a bin to set its **size**, **height** (7 mm units), **compartments** (across × deep), **label tab** (along the back, 45° underside so it prints without support), **finger scoop** (curved front) and **stacking lip**.
-- **Add tool bin** opens the Tool bin steps below for a new bin; its size comes from its layout. Select a tool bin and press **Edit tool layout** to go back to it. The header shows which tool bin you're editing.
+Designing a bin and putting it in the drawer are separate: you keep a list of **bin designs**, then place copies of them.
+- **Bin designs:** **+ Standard bin** makes a plain design; click it to set its **name**, **size**, **height** (7 mm units), **compartments** (across × deep), **label tab** (along the back, 45° underside so it prints without support), **finger scoop** (curved front) and **stacking lip**. **+ Tool bin** opens the Tool bin steps below; press **Done ← Bins** (top) when finished. Double-click a tool design, or press **Edit tools**, to go back to it. Changing a design changes every placed copy.
+- **Place:** press **Place** on a design (or drag it from the list onto the drawer). A ghost follows the pointer: blue fits, red doesn't. Click to drop it; **R** or right-click turns it 90°, Shift-click keeps placing, Esc stops.
+- **In the drawer:** click a bin, then **R** rotates it (Shift+R the other way), drag moves it, its corner dot resizes its design, and **Delete** takes it out (the design stays). **Make unique** gives one copy its own design. Dragging across empty cells makes a plain bin; **Fill empty cells** packs every gap with bins up to the size you set, biggest first. Both reuse a matching plain design instead of making new ones.
 - Red outlines: the bin overlaps another, sits outside the grid, is taller than the drawer, or is a tool bin with no tools yet.
+- Only placed designs are made; Make lists the rest as not in the drawer.
 
 ## Make
 - One list of everything: **test** items first (baseplate test piece or laser hole-size strip), then the **baseplate**, then the **bins**, with how many of each. Identical bins are listed once with a count.

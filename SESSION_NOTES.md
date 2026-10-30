@@ -4,7 +4,7 @@
 - Now a Gridfinity drawer suite: **Drawer → Baseplate → Bins → Make**, with Capture / Layout / Generate as the steps for one tool bin. One project = one drawer (size, baseplate, bins, tool library, checklist).
 - Drawer: inside W × D × H, baseplate type (printed / laser / none), grid and tallest-bin info.
 - Baseplate: ultralight printed pieces (pad or gap, even or one corner, max print size, min rows), laser sheet DXF, test piece and hole-size test strip. Cross-section matches the user's reference 3MF.
-- Bins: grid editor (drag to add, move, resize, fill empty cells), standard bins with compartments / label tab / scoop / stacking lip (`js/bins.js`), tool bins that open the tool steps. Overlap, outside-grid, too-tall and empty-tool-bin warnings.
+- Bins: list of **bin designs** (standard: compartments / label tab / scoop / lip in `js/bins.js`; tool designs open the tool steps, **Done ← Bins** returns) placed as copies on the grid (Place button or drag from the list, ghost preview, R rotates, Make unique). Drag across cells / Fill reuse plain designs. Overlap, outside-grid, too-tall and empty-tool-bin warnings.
 - Make: build list with counts and checklist, Bambu 3MF with plates, STL zip, laser DXF. 3MF and zip checked structurally in the browser (all XML parses, every reference resolves); **not yet opened in Bambu Studio**.
 - Tool tracing as before: node outlines, symmetry, brushes, notches, chamfer, work area. Tutorial covers the drawer flow, then the tool-bin steps with the sample photo.
 - Own repo (MIT) with a GitHub remote (`justinsprangers/ToolTrace`); suite commits not pushed.
@@ -22,6 +22,7 @@
 - The user's previous session was very long (1,400+ messages). Compact early.
 
 ## Log
+- 2026-10-30: Bin designs separate from placement (project v4, v3 migrates), ghost placing, drag from list, rotation, Done ← Bins. Tested in the browser pane by script (pane hidden, no screenshots); not yet tried by the user.
 - 2026-10-29: Tutorial sample shapes never persist; tool bins left empty by them are removed. Pushed the suite to GitHub.
 - 2026-10-29: Recovered the user's 4 tools (from Edge storage of the github.io copy) into Downloads/tooltrace-recovered-tools.json. Storage is per origin: file:// and github.io copies don't share data.
 - 2026-10-29: Suite: Drawer tab and project model, standard bins + lip, Bins editor, Make tab (3MF, zip, checklist), docs and tutorial

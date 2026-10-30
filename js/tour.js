@@ -76,14 +76,16 @@ var TT = window.TT = window.TT || {};
       '<ul><li><b>3D printed</b>: ultralight pieces sized for your bed.</li><li><b>Laser-cut</b>: one sheet with a hole per cell.</li><li><b>None</b>: bins sit loose.</li></ul>', phase: 'drawer' },
     { target: 'details[data-key=bpArea]', title: '2. Baseplate', html:
       '<ul><li><b>Pad edges</b> fills the drawer exactly; <b>one corner</b> keeps more pieces standard.</li><li><b>Max print size</b> is your bed size.</li><li>Print the <b>test piece</b> first.</li></ul>', phase: 'baseplate' },
-    { target: 'details[data-key=bins]', title: '3. Bins', html:
-      '<ul><li>Drag across empty cells to add a bin; <b>Fill empty cells</b> does the rest.</li><li>Click a bin for compartments, label tab, scoop and stacking lip.</li><li>Bins too tall for the drawer turn red.</li></ul>', phase: 'bins' },
+    { target: 'details[data-key=binDesigns]', title: '3. Bin designs', html:
+      '<ul><li><b>+ Standard bin</b> or <b>+ Tool bin</b> makes a design; it isn’t in the drawer yet.</li><li>Click a design for its size, compartments, label tab, scoop and lip.</li><li><b>Place</b> (or drag it onto the drawer) puts in a copy; place as many as you like.</li></ul>', phase: 'bins' },
+    { target: 'details[data-key=bins]', title: 'Bins in the drawer', html:
+      '<ul><li>Click a bin, then <kbd>R</kbd> rotates it; drag to move, <kbd>Delete</kbd> takes it out.</li><li>Drag across empty cells for a plain bin; <b>Fill empty cells</b> does the rest.</li><li>Bins too tall for the drawer, or overlapping, turn red.</li></ul>', phase: 'bins' },
     { target: 'details[data-key=make]', title: '4. Make', wait: 2000, html:
       '<ul><li>Test pieces first, then the baseplate and bins, with counts.</li><li><b>Bambu 3MF</b>: every print on plates in one file. Or a zip of STLs.</li><li>Tick things off as you finish them.</li></ul>', phase: 'make' },
     { title: 'Tool bins', html:
       '<p>A bin with a pocket shaped like each tool, in three steps:</p>' +
       '<ol><li><b>Capture</b>: trace tools from a photo</li><li><b>Layout</b>: arrange them in a bin</li><li><b>Generate</b>: check the model</li></ol>' +
-      '<p class="tour-note">In Bins, <b>Add tool bin</b> starts one; it then shows on the drawer grid.</p>' +
+      '<p class="tour-note">In Bins, <b>+ Tool bin</b> starts one. <b>Done ← Bins</b> (top) saves it as a design to place.</p>' +
       '<div class="tour-acts"><button class="b primary" data-act="sample">Try it with a sample photo</button><button class="b" data-act="next">Use my own photo</button></div>',
       phase: 'capture', noNext: true },
     { target: 'details[data-key=photo]', title: 'Choose a photo', html:

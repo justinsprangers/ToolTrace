@@ -118,7 +118,7 @@
 
   $('saveProject').onclick = function () {
     var name = (DR.name || 'tooltrace-project').replace(/[^\w.-]+/g, '_');
-    download(name + '.json', JSON.stringify({ app: 'ToolTrace', version: 3, lib: S.lib, libOrder: S.libOrder, L: L, project: PRJ }), 'application/json');
+    download(name + '.json', JSON.stringify({ app: 'ToolTrace', version: 4, lib: S.lib, libOrder: S.libOrder, L: L, project: PRJ }), 'application/json');
   };
   $('openProject').onclick = function () { $('projectFile').click(); };
   $('projectFile').onchange = function () {
@@ -126,12 +126,13 @@
     if (!f) return;
     f.text().then(function (t) {
       var d = JSON.parse(t);
-      if (d.project && (S.libOrder.length || PRJ.bins.length) && !confirm('Replace the current drawer, bins and library with this project?')) return;
-      // A version 3 file replaces the drawer; an older one adds its layout as a new tool bin and
-      // its shapes to the library (so the drawer's other tool bins keep theirs).
-      if (d.project) { loadProject(d.project); S.curBin = PRJ.cur || null; }
+      if (d.project && (S.libOrder.length || PRJ.designs.length) && !confirm('Replace the current drawer, bins and library with this project?')) return;
+      // A version 3+ file replaces the drawer; an older one adds its layout as a new tool bin design
+      // and its shapes to the library (so the other tool designs keep theirs).
+      S.binSel = S.desSel = S.placing = null;
+      if (d.project) { loadProject(d.project); S.curDesign = PRJ.cur || null; }
       else {
-        S.curBin = null;
+        S.curDesign = null;
         d.lib = Object.assign({}, S.lib, d.lib || {});
         d.libOrder = S.libOrder.concat((d.libOrder || []).filter(function (id) { return S.libOrder.indexOf(id) < 0; }));
       }
@@ -157,13 +158,15 @@
 
   function setPhase(p) {
     S.phase = p;
+    if (p !== 'bins') S.placing = null;
     document.querySelectorAll('.phases button').forEach(function (b) { b.classList.toggle('on', b.dataset.phase === p); });
+    $('toolDone').hidden = !/^(capture|layout|generate)$/.test(p);
     document.querySelectorAll('aside > .panel').forEach(function (el) { el.hidden = el.id !== 'panel-' + p; });
     if (p === 'layout') renderLib();
     if (p === 'generate' && !S.gen) $('genInfo').textContent = L.items.length ? 'Press Generate to build the model.' : 'Place some tools in Layout first.';
     if (p === 'drawer') status('Drawer: measure the inside of the drawer or space, then pick a baseplate.');
     if (p === 'baseplate') status('Baseplate: padding and print size. In 3D, drag to turn and scroll to zoom.');
-    if (p === 'bins') status('Bins: drag across empty cells to add a bin; drag a bin to move it.');
+    if (p === 'bins') status('Bins: make designs on the left, then Place them in the drawer. Drag a bin to move it, R rotates.');
     if (/^(drawer|baseplate|bins)$/.test(p) && !S.bp) bpUpdate();
     if (p === 'bins') renderBins();
     if (p === 'make') { status('Make: print or cut the test items first, then the rest. Tick things off as you go.'); if (!S.make) { if (!S.bp) bpUpdate(); renderMake(); } }
@@ -1063,12 +1066,32 @@
   // (`tooltrace.project`) and in project files. bins: see the Bins tab; done: Make checklist ticks.
   var DR = { name: '', w: 500, d: 400, h: 60, unit: 1, plate: 'print' };
   var BPS = { clearance: 0.5, fill: true, oneCorner: false, corner: 'rb', maxPrint: 180, minRows: 2, hole: 37.5, kerf: 0.15 };
-  var PRJ = { drawer: DR, baseplate: BPS, bins: [], done: {} };
+  var PRJ = { drawer: DR, baseplate: BPS, designs: [], bins: [], done: {} };
   function loadProject(d) {
     if (!d) return;
     if (d.drawer) Object.assign(DR, d.drawer);
     if (d.baseplate) Object.assign(BPS, d.baseplate);
-    PRJ.bins = d.bins || []; PRJ.done = d.done || {}; PRJ.cur = d.cur || null;
+    PRJ.done = d.done || {}; PRJ.cur = d.cur || null;
+    if (d.designs) { PRJ.designs = d.designs; PRJ.bins = d.bins || []; } else migrateBins(d.bins || [], d.cur);
+    PRJ.bins = PRJ.bins.filter(function (b) { b.rot = b.rot || 0; return PRJ.designs.some(function (x) { return x.id === b.design; }); });
+  }
+  // Before designs, each bin in the drawer was its own design: each becomes a design plus one
+  // placed copy, and identical standard bins share a design.
+  function migrateBins(old, cur) {
+    var byKey = {};
+    PRJ.designs = []; PRJ.bins = [];
+    old.forEach(function (b) {
+      b.opt = b.opt || { cx: 1, cy: 1, label: false, scoop: false, lip: b.kind === 'std' };
+      var k = b.kind === 'std' && stdKey(b), des = k && byKey[k];
+      if (!des) {
+        des = { id: uid(), name: '', kind: b.kind, kx: b.kx, ky: b.ky, units: b.units, opt: b.opt };
+        if (b.layout) des.layout = b.layout;
+        PRJ.designs.push(des);
+        if (k) byKey[k] = des;
+      }
+      if (b.id === cur) PRJ.cur = des.id;
+      PRJ.bins.push({ id: b.id, design: des.id, x: b.x, y: b.y, rot: 0 });
+    });
   }
   try {
     var oldBp = JSON.parse(localStorage.getItem('tooltrace.baseplate') || 'null'); // before projects
@@ -1230,33 +1253,44 @@
     }));
   }
 
-  // ---------- 3. Bins: standard and tool bins on the drawer grid ----------
+  // ---------- 3. Bins: bin designs, placed on the drawer grid ----------
 
-  // A bin: {id, kind: 'std' | 'tool', x, y (cell column, row from the front-left), kx, ky, units,
-  // opt: {cx, cy, label, scoop, lip}, layout (tool bins: a copy of L)}. The tool bin being edited
-  // in Capture / Layout / Generate is S.curBin; its layout lives in L and is copied back on save().
+  // A design is what gets printed: {id, name, kind: 'std' | 'tool', kx, ky, units, opt: {cx, cy,
+  // label, scoop, lip}, layout (tool designs: a copy of L)}. A placed bin is one copy of a design in
+  // the drawer: {id, design, x, y (cell column, row of its front-left cell), rot (quarter turns
+  // clockwise seen from above)}. The tool design being edited in Capture / Layout / Generate is
+  // S.curDesign; its layout lives in L and is copied back on save().
   var LAYOUT_DEFAULTS = JSON.parse(JSON.stringify(L));
-  S.binSel = null; S.curBin = PRJ.cur || null;
+  S.binSel = null; S.desSel = null; S.placing = null; S.curDesign = PRJ.cur || null;
   ctl('binNewCtls', 'binFillMax', 'Fill with bins up to', 1, 6, 1, 3, 'cells', function () {});
   ctl('binNewCtls', 'binNewU', 'New bin height', 1, 20, 1, 6, 'units', function () {});
 
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+  function designById(id) { return PRJ.designs.find(function (d) { return d.id === id; }) || null; }
   function binById(id) { return PRJ.bins.find(function (b) { return b.id === id; }) || null; }
-  function binName(b) {
-    var k = PRJ.bins.indexOf(b) + 1;
-    if (b.kind !== 'tool') return 'Bin ' + k;
-    var it = b.layout && b.layout.items && b.layout.items[0], sh = it && S.lib[it.shapeId];
-    return 'Tool bin ' + k + (sh ? ' (' + sh.name + (b.layout.items.length > 1 ? ' +' + (b.layout.items.length - 1) : '') + ')' : '');
+  function designOf(b) { return designById(b.design); }
+  function placedOf(d) { return PRJ.bins.filter(function (b) { return b.design === d.id; }); }
+  function autoName(d) {
+    if (d.kind !== 'tool') return 'Bin ' + d.kx + '×' + d.ky;
+    var k = PRJ.designs.filter(function (x) { return x.kind === 'tool'; }).indexOf(d) + 1;
+    var it = d.layout && d.layout.items && d.layout.items[0], sh = it && S.lib[it.shapeId];
+    return 'Tool bin ' + k + (sh ? ' (' + sh.name + (d.layout.items.length > 1 ? ' +' + (d.layout.items.length - 1) : '') + ')' : '');
   }
-  function binTop(b) { return b.units * G.unitH + (b.opt && b.opt.lip ? LIP_H : 0); }
+  function designName(d) { return d.name || autoName(d); }
+  function binTop(d) { return d.units * G.unitH + (d.opt && d.opt.lip ? LIP_H : 0); }
   function defaultUnits() { return Math.max(1, Math.min(C.binNewU.get(), maxUnits(true) >= 1 ? maxUnits(true) : maxUnits(false))); }
+  // Cells a design covers when turned rot quarter turns.
+  function turned(d, rot) { return rot % 2 ? [d.ky, d.kx] : [d.kx, d.ky]; }
+  function foot(b) { return turned(designOf(b), b.rot); }
 
-  // Which bin covers each cell: occ[j][i] = list of bin ids.
+  // Which placed bin covers each cell: occ[j][i] = list of bin ids.
   function occupancy(skip) {
     var p = S.bp, occ = [];
     for (var j = 0; j < p.ny; j++) { occ.push([]); for (var i = 0; i < p.nx; i++) occ[j].push([]); }
     PRJ.bins.forEach(function (b) {
       if (b.id === skip) return;
-      for (var j = b.y; j < b.y + b.ky; j++) for (var i = b.x; i < b.x + b.kx; i++) if (occ[j] && occ[j][i]) occ[j][i].push(b.id);
+      var f = foot(b);
+      for (var j = b.y; j < b.y + f[1]; j++) for (var i = b.x; i < b.x + f[0]; i++) if (occ[j] && occ[j][i]) occ[j][i].push(b.id);
     });
     return occ;
   }
@@ -1266,180 +1300,285 @@
     return true;
   }
 
-  // New bin at (x, y), or at the first free spot (front row first) when x is undefined.
-  function newBin(kind, kx, ky, x, y) {
-    var b = { id: uid(), kind: kind, x: 0, y: 0, kx: kx, ky: ky, units: defaultUnits(), opt: { cx: 1, cy: 1, label: false, scoop: false, lip: kind === 'std' } };
-    if (x === undefined && S.bp && !S.bp.error) {
-      var occ = occupancy(), found = false;
-      for (var j = 0; j < S.bp.ny && !found; j++) for (var i = 0; i < S.bp.nx && !found; i++) if (freeAt(occ, i, j, kx, ky)) { b.x = i; b.y = j; found = true; }
-    } else if (x !== undefined) { b.x = x; b.y = y; }
+  function newDesign(kind, kx, ky) {
+    var d = { id: uid(), name: '', kind: kind, kx: kx, ky: ky, units: defaultUnits(), opt: { cx: 1, cy: 1, label: false, scoop: false, lip: kind === 'std' } };
+    if (kind === 'tool') { d.layout = clone(LAYOUT_DEFAULTS); d.layout.nx = kx; d.layout.ny = ky; d.layout.units = d.units; }
+    PRJ.designs.push(d);
+    return d;
+  }
+
+  // Put a copy of design d at cell (x, y), or at the first free spot (front row first) when x is
+  // undefined. Returns the placed bin, or null when there's no room.
+  function placeDesign(d, x, y, rot) {
+    rot = rot || 0;
+    if (x === undefined) {
+      var p = S.bp, f = turned(d, rot), occ = occupancy();
+      for (var j = 0; j < p.ny && x === undefined; j++) for (var i = 0; i < p.nx && x === undefined; i++) if (freeAt(occ, i, j, f[0], f[1])) { x = i; y = j; }
+      if (x === undefined) return null;
+    }
+    var b = { id: uid(), design: d.id, x: x, y: y, rot: rot };
     PRJ.bins.push(b);
     return b;
   }
 
-  // Copy the layout being edited into its tool bin (making one when the first tool is placed).
+  // A plain standard design kx × ky (either way round) to reuse, so drawing bins and Fill empty cells
+  // don't pile up identical designs. Returns {d, rot}.
+  function plainStd(kx, ky) {
+    var u = defaultUnits(), d = PRJ.designs.find(function (x) {
+      return x.kind === 'std' && !x.name && x.units === u && x.opt.cx === 1 && x.opt.cy === 1 && !x.opt.label && !x.opt.scoop && x.opt.lip &&
+        (x.kx === kx && x.ky === ky || x.kx === ky && x.ky === kx);
+    }) || newDesign('std', kx, ky);
+    return { d: d, rot: d.kx === kx ? 0 : 1 };
+  }
+
+  // Copy the layout being edited into its tool design (making one when the first tool is placed).
   function syncToolBin() {
     if (TT.tourOpen) return; // the tutorial works on its own temporary bin
-    var b = binById(S.curBin);
-    if (!b) {
-      if (!L.items.length || !S.bp || S.bp.error) return;
-      b = newBin('tool', L.nx, L.ny); S.curBin = b.id;
+    var d = designById(S.curDesign);
+    if (!d) {
+      if (!L.items.length) return;
+      d = newDesign('tool', L.nx, L.ny); S.curDesign = S.desSel = d.id;
     }
-    b.layout = JSON.parse(JSON.stringify(L)); b.kx = L.nx; b.ky = L.ny; b.opt.lip = !!L.lip;
-    b.units = L.autoUnits && L.items.length ? TT.autoHeight(layoutForGeometry()) : L.units;
-    PRJ.cur = S.curBin; S.make = null;
+    d.layout = clone(L); d.kx = L.nx; d.ky = L.ny; d.opt.lip = !!L.lip;
+    d.units = L.autoUnits && L.items.length ? TT.autoHeight(layoutForGeometry()) : L.units;
+    PRJ.cur = S.curDesign; S.make = null;
     saveProject(); toolBinLabel();
   }
 
   function toolBinLabel() {
-    var b = binById(S.curBin);
-    $('toolBinName').textContent = b ? binName(b) + ':' : 'Tool bin:';
+    var d = designById(S.curDesign);
+    $('toolBinName').textContent = d ? 'Editing ' + designName(d) + ':' : 'New tool bin:';
   }
 
-  // Load a tool bin's layout into L and open its steps.
+  // Load a tool design's layout into L and open its steps.
   function openToolBin(id, phase) {
-    var b = binById(id);
-    if (!b) return;
-    S.curBin = PRJ.cur = id;
-    var lay = Object.assign(JSON.parse(JSON.stringify(LAYOUT_DEFAULTS)), JSON.parse(JSON.stringify(b.layout || {})));
-    if (!b.layout) { lay.nx = b.kx; lay.ny = b.ky; lay.units = b.units; }
+    var d = designById(id);
+    if (!d) return;
+    S.curDesign = PRJ.cur = S.desSel = id; S.placing = null;
+    var lay = Object.assign(clone(LAYOUT_DEFAULTS), clone(d.layout || {}));
+    if (!d.layout) { lay.nx = d.kx; lay.ny = d.ky; lay.units = d.units; }
     Object.keys(lay).forEach(function (k) { L[k] = lay[k]; });
     S.sel = null; S.selNotch = null; S.layHist = []; S.layIdx = -1;
     syncLayoutInputs(); invalidate(); syncSel(); describeLayout(); layoutSnapshot(); renderLib();
-    b.layout = JSON.parse(JSON.stringify(L));
+    d.layout = clone(L);
     saveProject(); save(); toolBinLabel();
     setPhase(phase || (L.items.length || S.libOrder.length ? 'layout' : 'capture'));
   }
 
+  // Back from the tool steps to Bins, with the design selected.
+  $('toolDone').onclick = function () {
+    save();
+    var d = designById(S.curDesign);
+    S.binSel = null; if (d) S.desSel = d.id;
+    setPhase('bins');
+    if (d && !placedOf(d).length) status(designName(d) + ' is saved. Press Place to put it in the drawer.');
+  };
+
+  // Take a placed bin out of the drawer (its design stays).
   function removeBin(b) {
     PRJ.bins = PRJ.bins.filter(function (x) { return x !== b; });
     if (S.binSel === b.id) S.binSel = null;
-    if (S.curBin === b.id) {
-      S.curBin = PRJ.cur = null;
-      Object.keys(LAYOUT_DEFAULTS).forEach(function (k) { L[k] = JSON.parse(JSON.stringify(LAYOUT_DEFAULTS[k])); });
+    binsChanged();
+  }
+
+  // Delete a design and every placed copy of it.
+  function deleteDesign(d) {
+    PRJ.bins = PRJ.bins.filter(function (b) { return b.design !== d.id; });
+    PRJ.designs = PRJ.designs.filter(function (x) { return x !== d; });
+    if (S.desSel === d.id) S.desSel = null;
+    if (S.binSel && !binById(S.binSel)) S.binSel = null;
+    if (S.placing && S.placing.design === d.id) S.placing = null;
+    if (S.curDesign === d.id) {
+      S.curDesign = PRJ.cur = null;
+      Object.keys(LAYOUT_DEFAULTS).forEach(function (k) { L[k] = clone(LAYOUT_DEFAULTS[k]); });
       S.sel = null; syncLayoutInputs(); invalidate(); describeLayout(); save(); toolBinLabel();
     }
     binsChanged();
   }
 
-  // Tool bins lose tools whose shape left the library; a bin that had tools and lost them all
-  // (e.g. tutorial samples) is removed. Bins made empty on purpose stay.
+  // Tool designs lose tools whose shape left the library; a design that had tools and lost them all
+  // (e.g. tutorial samples) is deleted. Designs made empty on purpose stay.
   function cleanToolBins() {
-    PRJ.bins.slice().forEach(function (b) {
-      if (b.kind !== 'tool' || !b.layout || !b.layout.items || !b.layout.items.length) return;
-      var keep = b.layout.items.filter(function (it) { return S.lib[it.shapeId]; }), ids = {};
-      if (keep.length === b.layout.items.length) return;
-      if (!keep.length) { removeBin(b); return; }
+    PRJ.designs.slice().forEach(function (d) {
+      if (d.kind !== 'tool' || !d.layout || !d.layout.items || !d.layout.items.length) return;
+      var keep = d.layout.items.filter(function (it) { return S.lib[it.shapeId]; }), ids = {};
+      if (keep.length === d.layout.items.length) return;
+      if (!keep.length) { deleteDesign(d); return; }
       keep.forEach(function (it) { ids[it.uid] = 1; });
-      b.layout.items = keep;
-      b.layout.notches = (b.layout.notches || []).filter(function (n) { return !n.item || ids[n.item]; });
+      d.layout.items = keep;
+      d.layout.notches = (d.layout.notches || []).filter(function (n) { return !n.item || ids[n.item]; });
     });
     saveProject();
   }
 
   function binsChanged() { S.make = null; saveProject(); renderBins(); draw(); }
 
-  // Change a tool bin's layout whether or not it's the one in L.
-  function editToolLayout(b, fn) {
-    if (b.id === S.curBin) { fn(L); syncLayoutInputs(); invalidate(); save(); }
-    else { b.layout = b.layout || JSON.parse(JSON.stringify(LAYOUT_DEFAULTS)); fn(b.layout); }
+  // Change a tool design's layout whether or not it's the one in L.
+  function editToolLayout(d, fn) {
+    if (d.id === S.curDesign) { fn(L); syncLayoutInputs(); invalidate(); save(); }
+    else { d.layout = d.layout || clone(LAYOUT_DEFAULTS); fn(d.layout); }
   }
 
-  // Problems per bin id: outside the grid, overlapping, too tall.
+  // Problems per placed bin id: outside the grid, overlapping, too tall.
   function binProblems() {
     var out = {}, p = S.bp;
     if (!p || p.error) return out;
     var occ = occupancy();
     PRJ.bins.forEach(function (b) {
-      var why = [];
-      if (b.x < 0 || b.y < 0 || b.x + b.kx > p.nx || b.y + b.ky > p.ny) why.push('outside the grid');
-      for (var j = b.y; j < b.y + b.ky; j++) for (var i = b.x; i < b.x + b.kx; i++) {
+      var d = designOf(b), f = foot(b), why = [];
+      if (b.x < 0 || b.y < 0 || b.x + f[0] > p.nx || b.y + f[1] > p.ny) why.push('outside the grid');
+      for (var j = b.y; j < b.y + f[1]; j++) for (var i = b.x; i < b.x + f[0]; i++) {
         if (occ[j] && occ[j][i] && occ[j][i].length > 1 && why.indexOf('overlaps') < 0) why.push('overlaps');
       }
-      if (binTop(b) > DR.h - 1) why.push('too tall (' + binTop(b).toFixed(0) + ' mm, drawer ' + DR.h.toFixed(0) + ')');
-      if (b.kind === 'tool' && !(b.layout && b.layout.items && b.layout.items.length)) why.push('no tools yet');
+      if (binTop(d) > DR.h - 1) why.push('too tall (' + binTop(d).toFixed(0) + ' mm, drawer ' + DR.h.toFixed(0) + ')');
+      if (d.kind === 'tool' && !(d.layout && d.layout.items && d.layout.items.length)) why.push('no tools yet');
       if (why.length) out[b.id] = why;
     });
     return out;
   }
 
+  // Set an input's value unless the user is typing in it (re-setting moves the caret).
+  function setVal(id, v) { if (document.activeElement !== $(id)) $(id).value = v; }
+
   function renderBins() {
-    var list = $('binList'), probs = binProblems(), cells = 0;
+    var list = $('desList'), probs = binProblems(), cells = 0;
     list.innerHTML = '';
-    PRJ.bins.forEach(function (b) {
-      cells += b.kx * b.ky;
-      var row = document.createElement('div');
-      row.className = 'shaperow' + (b.id === S.binSel ? ' on' : '');
-      row.innerHTML = '<span>' + esc(binName(b)) + '</span><small>' + b.kx + ' × ' + b.ky + ' × ' + b.units + 'u</small>' +
-        (probs[b.id] ? '<small class="warn">' + esc(probs[b.id].join(', ')) + '</small>' : '');
-      row.onclick = function () { S.binSel = b.id; renderBins(); draw(); };
+    PRJ.designs.forEach(function (d) {
+      var n = placedOf(d).length, row = document.createElement('div');
+      row.className = 'shaperow' + (d.id === S.desSel ? ' on' : '');
+      row.draggable = true;
+      row.title = 'Click to edit' + (d.kind === 'tool' ? ' (double-click to edit its tools)' : '') + '; drag onto the drawer to place a copy';
+      row.appendChild(designThumb(d));
+      var tx = document.createElement('span');
+      tx.innerHTML = esc(designName(d)) + '<br><small style="margin:0">' + d.kx + ' × ' + d.ky + ' × ' + d.units + 'u · ' + (n ? n + ' placed' : 'not placed') + '</small>';
+      row.appendChild(tx);
+      var pb = document.createElement('button');
+      pb.className = 'b' + (n ? '' : ' primary'); pb.style.marginLeft = 'auto'; pb.textContent = 'Place'; pb.title = 'Put a copy in the drawer';
+      pb.onclick = function (e) { e.stopPropagation(); startPlacing(d); };
+      row.appendChild(pb);
+      row.onclick = function () { S.desSel = d.id; S.binSel = null; renderBins(); draw(); };
+      row.ondblclick = function () { if (d.kind === 'tool') openToolBin(d.id); };
+      row.ondragstart = function (e) {
+        e.dataTransfer.setData('text/plain', d.id); e.dataTransfer.effectAllowed = 'copy';
+        S.placing = { design: d.id, rot: 0, at: null }; S.desSel = d.id;
+      };
+      row.ondragend = function () { S.placing = null; draw(); };
       list.appendChild(row);
     });
+    if (!PRJ.designs.length) list.innerHTML = '<div class="hint">No designs yet. Make one above, or drag across empty cells in the drawer.</div>';
+
+    PRJ.bins.forEach(function (b) { var f = foot(b); cells += f[0] * f[1]; });
     var p = S.bp, total = p && !p.error ? p.nx * p.ny : 0, nProb = Object.keys(probs).length;
-    $('binInfo').innerHTML = esc(PRJ.bins.length + ' bin' + (PRJ.bins.length === 1 ? '' : 's') + ', ' + cells + ' of ' + total + ' cells used. Tallest that fits: ' + Math.max(0, maxUnits(false)) + ' units (' + Math.max(0, maxUnits(true)) + ' with lip).') +
+    $('binInfo').innerHTML = esc(PRJ.bins.length + ' bin' + (PRJ.bins.length === 1 ? '' : 's') + ' placed, ' + cells + ' of ' + total + ' cells used. Tallest that fits: ' + Math.max(0, maxUnits(false)) + ' units (' + Math.max(0, maxUnits(true)) + ' with lip).') +
       (nProb ? '\n<span class="warn">' + nProb + ' bin' + (nProb > 1 ? 's need' : ' needs') + ' attention (red).</span>' : '');
-    var b = binById(S.binSel);
+
+    var d = selDesign();
+    $('desSec').hidden = !d;
+    if (d) {
+      var n = placedOf(d).length;
+      $('desTitle').textContent = 'Design: ' + designName(d);
+      setVal('desName', d.name); $('desName').placeholder = autoName(d);
+      setVal('desKx', d.kx); setVal('desKy', d.ky); setVal('desU', d.units);
+      $('desKx').disabled = $('desKy').disabled = d.kind === 'tool';
+      $('desStdOpts').hidden = d.kind === 'tool';
+      setVal('desCx', d.opt.cx); setVal('desCy', d.opt.cy);
+      $('desLabel').checked = d.opt.label; $('desScoop').checked = d.opt.scoop; $('desLip').checked = d.opt.lip;
+      $('desEditTool').hidden = d.kind !== 'tool';
+      $('desInfo').textContent = (d.kind === 'tool' ? 'Size comes from the tool layout. ' : '') + dims([TT.binSize(d.kx), TT.binSize(d.ky), binTop(d)]) + '. ' +
+        (n ? 'Changes apply to ' + (n > 1 ? 'all ' + n + ' placed copies.' : 'the placed copy.') : 'Not in the drawer yet: press Place, or drag it from the list onto the drawer.');
+    }
+
+    var b = selBin();
     $('binSel').hidden = !b;
-    if (!b) return;
-    $('binSelTitle').textContent = binName(b);
-    $('binKx').value = b.kx; $('binKy').value = b.ky; $('binU').value = b.units;
-    $('binKx').disabled = $('binKy').disabled = b.kind === 'tool';
-    $('binStdOpts').hidden = b.kind === 'tool';
-    $('binCx').value = b.opt.cx; $('binCy').value = b.opt.cy;
-    $('binLabel').checked = b.opt.label; $('binScoop').checked = b.opt.scoop; $('binLip').checked = b.opt.lip;
-    $('binEditTool').hidden = b.kind !== 'tool';
-    $('binSelInfo').textContent = (b.kind === 'tool' ? 'Size comes from the tool layout. ' : '') + dims([TT.binSize(b.kx), TT.binSize(b.ky), binTop(b)]) +
-      (probs[b.id] ? ' · ' + probs[b.id].join(', ') : '');
+    if (b) {
+      var bd = designOf(b), f = foot(b);
+      $('binSelTitle').textContent = 'Placed bin: ' + designName(bd);
+      $('binUnique').hidden = placedOf(bd).length < 2;
+      $('binSelInfo').textContent = f[0] + ' × ' + f[1] + ' cells at column ' + (b.x + 1) + ', row ' + (b.y + 1) + ' from the front-left' +
+        (b.rot ? ', turned ' + b.rot * 90 + '°' : '') + '.' + (probs[b.id] ? ' ' + probs[b.id].join(', ') + '.' : '');
+    }
   }
 
-  // Selected-bin controls.
+  // A design's top view as a small canvas for the list.
+  function designThumb(d) {
+    var dpr = window.devicePixelRatio || 1, px = 40, c = document.createElement('canvas'), keep = ctx;
+    c.width = c.height = px * dpr; c.style.width = c.style.height = px + 'px'; c.style.flex = 'none';
+    var W = TT.binSize(d.kx), H = TT.binSize(d.ky), s = (px - 4) / Math.max(W, H) * dpr;
+    ctx = c.getContext('2d');
+    try {
+      ctx.setTransform(s, 0, 0, s, (px * dpr - W * s) / 2, (px * dpr - H * s) / 2);
+      drawDesignTop(d, dpr / s);
+      ctx.beginPath(); roundRectPath(0, 0, W, H, G.radius);
+      ctx.strokeStyle = '#333'; ctx.lineWidth = dpr / s; ctx.stroke();
+    } finally { ctx = keep; }
+    return c;
+  }
+
+  // Selected design and placed-bin controls.
   function selBin() { return binById(S.binSel); }
+  function selDesign() { return designById(S.desSel); }
   function intIn(el, min) { var v = Math.round(+el.value); return v >= min ? v : null; }
-  $('binKx').oninput = $('binKy').oninput = function () {
-    var b = selBin(), kx = intIn($('binKx'), 1), ky = intIn($('binKy'), 1);
-    if (b && kx && ky && b.kind === 'std') { b.kx = kx; b.ky = ky; b.opt.cx = Math.min(b.opt.cx, kx * 6); binsChanged(); }
+  $('desName').oninput = function () { var d = selDesign(); if (d) { d.name = this.value.trim(); binsChanged(); toolBinLabel(); } };
+  $('desKx').oninput = $('desKy').oninput = function () {
+    var d = selDesign(), kx = intIn($('desKx'), 1), ky = intIn($('desKy'), 1);
+    if (d && kx && ky && d.kind === 'std') { d.kx = kx; d.ky = ky; d.opt.cx = Math.min(d.opt.cx, kx * 6); d.opt.cy = Math.min(d.opt.cy, ky * 6); binsChanged(); }
   };
-  $('binU').oninput = function () {
-    var b = selBin(), u = intIn(this, 1);
-    if (!b || !u) return;
-    b.units = u;
-    if (b.kind === 'tool') editToolLayout(b, function (l) { l.units = u; l.autoUnits = false; });
+  $('desU').oninput = function () {
+    var d = selDesign(), u = intIn(this, 1);
+    if (!d || !u) return;
+    d.units = u;
+    if (d.kind === 'tool') editToolLayout(d, function (l) { l.units = u; l.autoUnits = false; });
     binsChanged();
   };
-  $('binCx').oninput = $('binCy').oninput = function () {
-    var b = selBin(), cx = intIn($('binCx'), 1), cy = intIn($('binCy'), 1);
-    if (b && cx && cy) { b.opt.cx = cx; b.opt.cy = cy; binsChanged(); }
+  $('desCx').oninput = $('desCy').oninput = function () {
+    var d = selDesign(), cx = intIn($('desCx'), 1), cy = intIn($('desCy'), 1);
+    if (d && cx && cy) { d.opt.cx = cx; d.opt.cy = cy; binsChanged(); }
   };
-  [['binLabel', 'label'], ['binScoop', 'scoop'], ['binLip', 'lip']].forEach(function (f) {
+  [['desLabel', 'label'], ['desScoop', 'scoop'], ['desLip', 'lip']].forEach(function (f) {
     $(f[0]).onchange = function () {
-      var b = selBin(), on = this.checked;
-      if (!b) return;
-      b.opt[f[1]] = on;
-      if (f[1] === 'lip' && b.kind === 'tool') editToolLayout(b, function (l) { l.lip = on; });
+      var d = selDesign(), on = this.checked;
+      if (!d) return;
+      d.opt[f[1]] = on;
+      if (f[1] === 'lip' && d.kind === 'tool') editToolLayout(d, function (l) { l.lip = on; });
       binsChanged();
     };
   });
-  $('binEditTool').onclick = function () { var b = selBin(); if (b) openToolBin(b.id); };
-  $('binDel').onclick = function () { var b = selBin(); if (b) removeBin(b); };
-  $('binDup').onclick = function () {
+  $('desPlace').onclick = function () { var d = selDesign(); if (d) startPlacing(d); };
+  $('desEditTool').onclick = function () { var d = selDesign(); if (d) openToolBin(d.id); };
+  $('desDel').onclick = function () {
+    var d = selDesign(), n = d ? placedOf(d).length : 0;
+    if (d && (!n || confirm('Delete ' + designName(d) + '? Its ' + n + ' placed cop' + (n > 1 ? 'ies come' : 'y comes') + ' out of the drawer too.'))) deleteDesign(d);
+  };
+  // A copy of a design (not placed), inserted after it.
+  function copyDesign(d) {
+    var c = clone(d.id === S.curDesign ? Object.assign({}, d, { layout: L }) : d);
+    c.id = uid(); c.name = d.name ? d.name + ' copy' : '';
+    PRJ.designs.splice(PRJ.designs.indexOf(d) + 1, 0, c);
+    return c;
+  }
+  $('desDup').onclick = function () { var d = selDesign(); if (d) { S.desSel = copyDesign(d).id; S.binSel = null; binsChanged(); } };
+  $('desNewStd').onclick = function () {
+    var d = newDesign('std', 1, 1);
+    S.desSel = d.id; S.binSel = null; binsChanged();
+    status('New standard bin: set its size and options, then press Place.');
+  };
+  $('desNewTool').onclick = function () {
+    var d = newDesign('tool', 2, 1);
+    S.binSel = null; binsChanged(); openToolBin(d.id);
+    status('New tool bin: trace tools in Capture (or add library shapes in Layout), then press Done ← Bins.');
+  };
+  $('binRot').onclick = function () { var b = selBin(); if (b) rotateBin(b, 1); };
+  $('binUnique').onclick = function () {
     var b = selBin();
     if (!b) return;
-    var c = newBin(b.kind, b.kx, b.ky);
-    c.units = b.units; c.opt = JSON.parse(JSON.stringify(b.opt));
-    if (b.kind === 'tool') c.layout = JSON.parse(JSON.stringify(b.id === S.curBin ? L : b.layout || LAYOUT_DEFAULTS));
-    S.binSel = c.id; binsChanged();
+    var c = copyDesign(designOf(b));
+    b.design = S.desSel = c.id; binsChanged();
+    status('This bin now has its own design: ' + designName(c) + '.');
   };
-  $('binAddTool').onclick = function () {
-    if (!S.bp || S.bp.error) return;
-    var b = newBin('tool', 2, 1);
-    b.layout = JSON.parse(JSON.stringify(LAYOUT_DEFAULTS));
-    b.layout.units = b.units; b.layout.nx = 2; b.layout.ny = 1;
-    S.binSel = b.id; binsChanged(); openToolBin(b.id);
-    status('New tool bin: trace tools in Capture (or add library shapes in Layout). It appears in Bins when you go back.');
-  };
+  $('binDel').onclick = function () { var b = selBin(); if (b) removeBin(b); };
   $('binClear').onclick = function () {
-    if (PRJ.bins.length && confirm('Remove all ' + PRJ.bins.length + ' bins from this drawer (tool layouts too)?')) {
-      PRJ.bins.slice().forEach(removeBin);
+    if (PRJ.bins.length && confirm('Take all ' + PRJ.bins.length + ' bins out of the drawer? The designs stay in the list.')) {
+      PRJ.bins = []; S.binSel = null; binsChanged();
     }
   };
   // Fill the empty cells, biggest bins first (up to the chosen size), front row first.
@@ -1452,7 +1591,7 @@
         if (size % kx || size / kx > max) continue;
         var ky = size / kx, occ = occupancy();
         for (var j = 0; j < p.ny; j++) for (var i = 0; i < p.nx; i++) {
-          if (freeAt(occ, i, j, kx, ky)) { newBin('std', kx, ky, i, j); added++; occ = occupancy(); }
+          if (freeAt(occ, i, j, kx, ky)) { var ps = plainStd(kx, ky); placeDesign(ps.d, i, j, ps.rot); added++; occ = occupancy(); }
         }
       }
     }
@@ -1460,15 +1599,74 @@
     status(added ? 'Added ' + added + ' bins.' : 'No empty cells.');
   };
 
+  // Turn a placed bin a quarter turn (dir 1 clockwise, -1 back), keeping its front-left cell and
+  // nudging it back inside the grid.
+  function rotateBin(b, dir) {
+    var p = S.bp;
+    b.rot = (b.rot + dir + 4) % 4;
+    var f = foot(b);
+    b.x = Math.max(0, Math.min(b.x, p.nx - f[0])); b.y = Math.max(0, Math.min(b.y, p.ny - f[1]));
+    binsChanged();
+  }
+
+  // Placing: a ghost of the design follows the pointer, snapped to cells; click drops a copy.
+  function startPlacing(d) {
+    if (!S.bp || S.bp.error) { status('Set the drawer size first.', true); return; }
+    S.placing = { design: d.id, rot: 0, at: null };
+    S.desSel = d.id; S.binSel = null;
+    if (S.phase !== 'bins') setPhase('bins');
+    renderBins(); draw(); cv.focus();
+    status('Placing ' + designName(d) + ': click a spot in the drawer. R or right-click turns it, Shift-click places more, Esc stops.');
+  }
+  function placingFoot() { return turned(designById(S.placing.design), S.placing.rot); }
+  // Front-left cell for the ghost: centred on the cell under the pointer, kept inside the grid.
+  function placingAt(w) {
+    var p = S.bp, f = placingFoot(), c = cellAt(w);
+    if (w[0] < 0 || w[1] < 0 || w[0] > p.w || w[1] > p.d) return null;
+    return [Math.max(0, Math.min(p.nx - f[0], c[0] - Math.floor((f[0] - 1) / 2))), Math.max(0, Math.min(p.ny - f[1], c[1] - Math.floor((f[1] - 1) / 2)))];
+  }
+  function placingFits() {
+    var at = S.placing && S.placing.at, f;
+    return !!at && (f = placingFoot(), freeAt(occupancy(), at[0], at[1], f[0], f[1]));
+  }
+  function dropPlacing(keep) {
+    var pl = S.placing, d = pl && designById(pl.design);
+    if (!d || !pl.at) return;
+    if (!placingFits()) { status('That spot is taken or outside the grid.', true); return; }
+    var b = placeDesign(d, pl.at[0], pl.at[1], pl.rot);
+    if (keep) S.binSel = null; else { S.placing = null; S.binSel = b.id; }
+    binsChanged();
+    status(keep ? 'Placed. Click to place another; Esc stops.' : 'Placed ' + designName(d) + '. R turns it, drag to move, Delete takes it out.');
+  }
+  function rotatePlacing(dir) {
+    S.placing.rot = (S.placing.rot + dir + 4) % 4;
+    if (S.placing.at && S.mouse) S.placing.at = placingAt(toWorld({ clientX: S.mouse[0] + cv.getBoundingClientRect().left, clientY: S.mouse[1] + cv.getBoundingClientRect().top }));
+    draw();
+  }
+  cv.addEventListener('dragover', function (e) {
+    if (S.phase !== 'bins' || !S.placing) return;
+    e.preventDefault(); e.dataTransfer.dropEffect = 'copy';
+    var at = placingAt(toWorld(e));
+    if (String(at) !== String(S.placing.at)) { S.placing.at = at; draw(); }
+  });
+  cv.addEventListener('dragleave', function () { if (S.placing) { S.placing.at = null; draw(); } });
+  cv.addEventListener('drop', function (e) {
+    if (S.phase !== 'bins' || !S.placing) return;
+    e.preventDefault();
+    S.placing.at = placingAt(toWorld(e));
+    dropPlacing(false); S.placing = null; draw();
+  });
+
   // Canvas: cell under a world point (screen y down), and a bin's rectangle in world coords.
   function cellAt(w) {
     var p = S.bp, P = TT.BP.pitch;
     return [Math.floor((w[0] - p.grid[0]) / P), Math.floor((p.d - w[1] - p.grid[1]) / P)];
   }
-  function binBox(b) {
-    var p = S.bp, P = TT.BP.pitch, x0 = p.grid[0] + b.x * P + G.gap / 2, y1 = p.grid[1] + (b.y + b.ky) * P - G.gap / 2;
-    return { x: x0, y: p.d - y1, w: TT.binSize(b.kx), h: TT.binSize(b.ky) };
+  function cellBox(x, y, kx, ky) {
+    var p = S.bp, P = TT.BP.pitch, x0 = p.grid[0] + x * P + G.gap / 2, y1 = p.grid[1] + (y + ky) * P - G.gap / 2;
+    return { x: x0, y: p.d - y1, w: TT.binSize(kx), h: TT.binSize(ky) };
   }
+  function binBox(b) { var f = foot(b); return cellBox(b.x, b.y, f[0], f[1]); }
   function binAt(w) {
     for (var k = PRJ.bins.length - 1; k >= 0; k--) {
       var r = binBox(PRJ.bins[k]);
@@ -1478,17 +1676,18 @@
   }
   function binHandle(b) { var r = binBox(b); return [r.x + r.w, r.y]; } // back-right corner
 
-  function binsPointerDown(w, v) {
+  function binsPointerDown(w, v, e) {
     var p = S.bp;
     if (!p || p.error) return false;
+    if (S.placing) { S.placing.at = placingAt(w); dropPlacing(e.shiftKey); draw(); return false; }
     var b = selBin();
-    if (b && b.kind === 'std') {
+    if (b && designOf(b).kind === 'std') {
       var h = binHandle(b);
       if (Math.hypot(h[0] - w[0], h[1] - w[1]) < 9 / v.s) { S.drag = { binResize: b }; return true; }
     }
     var hit = binAt(w), c = cellAt(w);
     if (hit) {
-      S.binSel = hit.id; renderBins();
+      S.binSel = hit.id; S.desSel = hit.design; renderBins();
       S.drag = { binMove: hit, c0: c, x0: hit.x, y0: hit.y, moved: false };
     } else {
       S.binSel = null; renderBins();
@@ -1502,20 +1701,21 @@
     var clamp = function (v, lo, hi) { return Math.max(lo, Math.min(hi, v)); };
     if (d.binNew) d.c1 = [clamp(c[0], 0, p.nx - 1), clamp(c[1], 0, p.ny - 1)];
     else if (d.binMove) {
-      var b = d.binMove, nx = clamp(d.x0 + c[0] - d.c0[0], 0, Math.max(0, p.nx - b.kx)), ny = clamp(d.y0 + c[1] - d.c0[1], 0, Math.max(0, p.ny - b.ky));
+      var b = d.binMove, f = foot(b), nx = clamp(d.x0 + c[0] - d.c0[0], 0, Math.max(0, p.nx - f[0])), ny = clamp(d.y0 + c[1] - d.c0[1], 0, Math.max(0, p.ny - f[1]));
       if (nx !== b.x || ny !== b.y) { b.x = nx; b.y = ny; d.moved = true; }
     } else if (d.binResize) {
-      var r = d.binResize;
-      r.kx = clamp(c[0] - r.x + 1, 1, p.nx - r.x); r.ky = clamp(c[1] - r.y + 1, 1, p.ny - r.y);
-      r.opt.cx = Math.min(r.opt.cx, r.kx * 6); r.opt.cy = Math.min(r.opt.cy, r.ky * 6);
+      // Resizes the design (every copy), in the placed bin's turned frame.
+      var r = d.binResize, des = designOf(r), fx = clamp(c[0] - r.x + 1, 1, p.nx - r.x), fy = clamp(c[1] - r.y + 1, 1, p.ny - r.y);
+      if (r.rot % 2) { des.kx = fy; des.ky = fx; } else { des.kx = fx; des.ky = fy; }
+      des.opt.cx = Math.min(des.opt.cx, des.kx * 6); des.opt.cy = Math.min(des.opt.cy, des.ky * 6);
     }
     draw();
   }
   function binsPointerUp(d) {
     if (d.binNew) {
       var x = Math.min(d.c0[0], d.c1[0]), y = Math.min(d.c0[1], d.c1[1]);
-      var b = newBin('std', Math.abs(d.c1[0] - d.c0[0]) + 1, Math.abs(d.c1[1] - d.c0[1]) + 1, x, y);
-      S.binSel = b.id;
+      var ps = plainStd(Math.abs(d.c1[0] - d.c0[0]) + 1, Math.abs(d.c1[1] - d.c0[1]) + 1), b = placeDesign(ps.d, x, y, ps.rot);
+      S.binSel = b.id; S.desSel = ps.d.id;
     }
     binsChanged();
   }
@@ -1526,37 +1726,25 @@
     var v = drawArea(dpr, '#f3f5f7'), probs = binProblems(), P = TT.BP.pitch;
     if (p.error) { message(dpr, p.error); return; }
     PRJ.bins.forEach(function (b) {
-      var r = binBox(b), on = b.id === S.binSel;
+      var r = binBox(b), d = designOf(b), on = b.id === S.binSel, mine = !on && d.id === S.desSel;
+      drawTurned(d, b.rot, r);
       ctx.beginPath(); roundRectPath(r.x, r.y, r.w, r.h, G.radius);
-      ctx.fillStyle = b.kind === 'tool' ? '#ffd8a8' : '#a5d8ff'; ctx.fill();
-      ctx.save(); ctx.clip();
-      if (b.kind === 'std') {
-        // Label tab (back = top on screen), scoop (front), compartment walls.
-        ctx.fillStyle = 'rgba(0,0,0,0.12)';
-        if (b.opt.label) ctx.fillRect(r.x, r.y, r.w, 12);
-        if (b.opt.scoop) { ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fillRect(r.x, r.y + r.h - 10, r.w, 10); }
-        ctx.strokeStyle = 'rgba(0,60,120,0.5)'; ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        for (var i = 1; i < b.opt.cx; i++) { ctx.moveTo(r.x + r.w * i / b.opt.cx, r.y); ctx.lineTo(r.x + r.w * i / b.opt.cx, r.y + r.h); }
-        for (var j = 1; j < b.opt.cy; j++) { ctx.moveTo(r.x, r.y + r.h * j / b.opt.cy); ctx.lineTo(r.x + r.w, r.y + r.h * j / b.opt.cy); }
-        ctx.stroke();
-      } else if (b.layout && b.layout.items) {
-        // The tools, in bin coordinates (mm from the top-left seen from above).
-        ctx.translate(r.x, r.y);
-        b.layout.items.forEach(function (it) {
-          ctx.beginPath();
-          placed(it).forEach(function (l) { l.forEach(function (q, k) { ctx[k ? 'lineTo' : 'moveTo'](q[0], q[1]); }); ctx.closePath(); });
-          ctx.fillStyle = 'rgba(232,89,12,0.55)'; ctx.fill('evenodd');
-        });
-      }
-      ctx.restore();
-      ctx.beginPath(); roundRectPath(r.x, r.y, r.w, r.h, G.radius);
-      ctx.strokeStyle = probs[b.id] ? '#e03131' : on ? '#1c7ed6' : '#333'; ctx.lineWidth = (on || probs[b.id] ? 2.5 : 1.2) / v.s; ctx.stroke();
-      if (on && b.kind === 'std') {
+      ctx.strokeStyle = probs[b.id] ? '#e03131' : on || mine ? '#1c7ed6' : '#333'; ctx.lineWidth = (on || probs[b.id] ? 2.5 : mine ? 1.8 : 1.2) / v.s;
+      if (mine) ctx.setLineDash([5 / v.s, 3 / v.s]);
+      ctx.stroke(); ctx.setLineDash([]);
+      if (on && d.kind === 'std') {
         var hd = binHandle(b);
         ctx.beginPath(); ctx.arc(hd[0], hd[1], 6 / v.s, 0, 7); ctx.fillStyle = '#fff'; ctx.fill(); ctx.strokeStyle = '#1c7ed6'; ctx.lineWidth = 2 / v.s; ctx.stroke();
       }
     });
+    // Ghost of the design being placed: blue where it fits, red where it doesn't.
+    var pl = S.placing, pd = pl && pl.at && designById(pl.design);
+    if (pd) {
+      var pf = placingFoot(), gr = cellBox(pl.at[0], pl.at[1], pf[0], pf[1]), fits = placingFits();
+      ctx.globalAlpha = 0.6; drawTurned(pd, pl.rot, gr); ctx.globalAlpha = 1;
+      ctx.beginPath(); roundRectPath(gr.x, gr.y, gr.w, gr.h, G.radius);
+      ctx.strokeStyle = fits ? '#1c7ed6' : '#e03131'; ctx.lineWidth = 2.5 / v.s; ctx.setLineDash([6 / v.s, 4 / v.s]); ctx.stroke(); ctx.setLineDash([]);
+    }
     if (S.drag && S.drag.binNew) {
       var a = S.drag.c0, c = S.drag.c1, x0 = Math.min(a[0], c[0]), y0 = Math.min(a[1], c[1]);
       ctx.setLineDash([5 / v.s, 4 / v.s]); ctx.strokeStyle = '#1c7ed6'; ctx.lineWidth = 2 / v.s;
@@ -1568,22 +1756,60 @@
     PRJ.bins.forEach(function (b) {
       var r = binBox(b), x = (r.x + r.w / 2) * v.s + v.x, y = (r.y + r.h / 2) * v.s + v.y;
       if (r.w * v.s < 40) return;
-      ctx.font = '600 12px system-ui'; ctx.fillText(binName(b).replace(/ \(.*/, ''), x, y);
-      ctx.font = '11px system-ui'; ctx.fillText(b.kx + '×' + b.ky + '×' + b.units + 'u', x, y + 13);
+      var d = designOf(b), f = foot(b);
+      ctx.font = '600 12px system-ui'; ctx.fillText(designName(d).replace(/ \(.*/, ''), x, y);
+      ctx.font = '11px system-ui'; ctx.fillText(f[0] + '×' + f[1] + '×' + d.units + 'u', x, y + 13);
     });
     ctx.fillStyle = '#555'; ctx.font = '12px system-ui';
     ctx.fillText((DR.name ? DR.name + ': ' : '') + dims([p.w, p.d, DR.h]), (p.w / 2) * v.s + v.x, v.y - 6);
     ctx.textAlign = 'start';
-    if (!PRJ.bins.length) message(dpr, 'Drag across cells to add a bin, or press Fill empty cells.');
+    if (!PRJ.bins.length && !S.placing) message(dpr, PRJ.designs.length ? 'Press Place on a design (or drag it here), or drag across cells for a plain bin.' : 'Drag across cells to add a bin, or press Fill empty cells.');
     drawRuler();
+  }
+
+  // Draw design d turned rot quarter turns (clockwise from above) into screen rect r.
+  function drawTurned(d, rot, r) {
+    var W = TT.binSize(d.kx), H = TT.binSize(d.ky);
+    ctx.save();
+    ctx.translate(r.x + r.w / 2, r.y + r.h / 2); ctx.rotate(rot * Math.PI / 2); ctx.translate(-W / 2, -H / 2);
+    drawDesignTop(d, 1 / vt().s);
+    ctx.restore();
+  }
+
+  // A design's top view in the current ctx, in mm from its top-left (back at the top); px is one
+  // screen pixel in mm.
+  function drawDesignTop(d, px) {
+    var W = TT.binSize(d.kx), H = TT.binSize(d.ky), lay = d.id === S.curDesign && !TT.tourOpen ? L : d.layout;
+    ctx.beginPath(); roundRectPath(0, 0, W, H, G.radius);
+    ctx.fillStyle = d.kind === 'tool' ? '#ffd8a8' : '#a5d8ff'; ctx.fill();
+    ctx.save(); ctx.clip();
+    if (d.kind === 'std') {
+      // Label tab (back = top), scoop (front), compartment walls.
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      if (d.opt.label) ctx.fillRect(0, 0, W, 12);
+      if (d.opt.scoop) { ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fillRect(0, H - 10, W, 10); }
+      ctx.strokeStyle = 'rgba(0,60,120,0.5)'; ctx.lineWidth = 1.2 * px;
+      ctx.beginPath();
+      for (var i = 1; i < d.opt.cx; i++) { ctx.moveTo(W * i / d.opt.cx, 0); ctx.lineTo(W * i / d.opt.cx, H); }
+      for (var j = 1; j < d.opt.cy; j++) { ctx.moveTo(0, H * j / d.opt.cy); ctx.lineTo(W, H * j / d.opt.cy); }
+      ctx.stroke();
+    } else if (lay && lay.items) {
+      // The tools, in layout coordinates (mm from the bin's top-left seen from above).
+      lay.items.forEach(function (it) {
+        ctx.beginPath();
+        placed(it).forEach(function (l) { l.forEach(function (q, k) { ctx[k ? 'lineTo' : 'moveTo'](q[0], q[1]); }); ctx.closePath(); });
+        ctx.fillStyle = 'rgba(232,89,12,0.55)'; ctx.fill('evenodd');
+      });
+    }
+    ctx.restore();
   }
 
   // ---------- 4. Make: everything to print or cut ----------
 
-  // Run fn with a tool bin's layout in L, then put L back.
-  function withLayout(b, fn) {
-    if (b.id === S.curBin) return fn();
-    var keep = JSON.parse(JSON.stringify(L)), lay = Object.assign(JSON.parse(JSON.stringify(LAYOUT_DEFAULTS)), JSON.parse(JSON.stringify(b.layout || {})));
+  // Run fn with a tool design's layout in L, then put L back.
+  function withLayout(d, fn) {
+    if (d.id === S.curDesign) return fn();
+    var keep = clone(L), lay = Object.assign(clone(LAYOUT_DEFAULTS), clone(d.layout || {}));
     Object.keys(lay).forEach(function (k) { L[k] = lay[k]; });
     try { return fn(); } finally { Object.keys(keep).forEach(function (k) { L[k] = keep[k]; }); }
   }
@@ -1623,20 +1849,26 @@
       add({ key: 'laser-sheet', group: 'plate', label: 'Laser-cut baseplate, ' + dims([S.bpLaser.w, S.bpLaser.h]), count: 1, file: 'baseplate_laser.dxf',
         dxf: function () { return TT.bpDxf(S.bpLaser, 'ToolTrace Gridfinity baseplate, hole ' + BPS.hole + ' mm, kerf ' + BPS.kerf + ' mm'); } });
     }
-    var groups = {}, probs = binProblems();
+    // One row per design (identical standard designs merged), counted by placed copies.
+    var groups = {}, probs = binProblems(), seen = {}, unplaced = [];
     PRJ.bins.forEach(function (b) {
-      if (probs[b.id] && probs[b.id].some(function (w) { return w !== 'no tools yet'; })) problems.push(binName(b) + ': ' + probs[b.id].join(', '));
-      if (b.kind === 'std') {
-        var k = stdKey(b);
-        if (!groups[k]) groups[k] = add({ key: 'std-' + k, group: 'bins', label: stdName(b), count: 0, file: fileSafe(stdName(b)) + '.stl',
-          shells: TT.stdBinMesh(Object.assign({ kx: b.kx, ky: b.ky, units: b.units }, b.opt)).shells });
-        groups[k].count++;
+      var w = probs[b.id] && probs[b.id].filter(function (x) { return x !== 'no tools yet'; }), msg = w && w.length && designName(designOf(b)) + ': ' + w.join(', ');
+      if (msg && !seen[msg]) { seen[msg] = 1; problems.push(msg); }
+    });
+    PRJ.designs.forEach(function (d) {
+      var n = placedOf(d).length;
+      if (!n) { unplaced.push(designName(d)); return; }
+      if (d.kind === 'std') {
+        var k = stdKey(d);
+        if (!groups[k]) groups[k] = add({ key: 'std-' + k, group: 'bins', label: d.name ? d.name + ' (' + stdName(d).replace(/^Bin /, '') + ')' : stdName(d), count: 0,
+          file: fileSafe(d.name || stdName(d)) + '.stl', shells: TT.stdBinMesh(Object.assign({ kx: d.kx, ky: d.ky, units: d.units }, d.opt)).shells });
+        groups[k].count += n;
         return;
       }
-      if (!(b.layout && b.layout.items && b.layout.items.length)) { problems.push(binName(b) + ' has no tools yet, so it is left out.'); return; }
-      toolBinPieces(b).forEach(function (q, i, all) {
-        add({ key: 'tool-' + b.id + '-' + i, group: 'bins', label: binName(b) + (all.length > 1 ? ', piece ' + (i + 1) : '') + ', ' + q.pc.kx + '×' + q.pc.ky + '×' + q.units + 'u',
-          count: 1, shells: q.mesh.shells, file: fileSafe(binName(b)) + (all.length > 1 ? '_part' + (i + 1) : '') + '.stl' });
+      if (!(d.layout && d.layout.items && d.layout.items.length)) { problems.push(designName(d) + ' has no tools yet, so it is left out.'); return; }
+      toolBinPieces(d).forEach(function (q, i, all) {
+        add({ key: 'tool-' + d.id + '-' + i, group: 'bins', label: designName(d) + (all.length > 1 ? ', piece ' + (i + 1) : '') + ', ' + q.pc.kx + '×' + q.pc.ky + '×' + q.units + 'u',
+          count: n, shells: q.mesh.shells, file: fileSafe(designName(d)) + (all.length > 1 ? '_part' + (i + 1) : '') + '.stl' });
       });
     });
     rows.forEach(function (r) {
@@ -1658,7 +1890,7 @@
     });
     var pack = TT.packPlates(items, BPS.maxPrint);
     pack.tooBig.forEach(function (it) { problems.push(it.name + ' is bigger than the ' + BPS.maxPrint + ' mm bed.'); });
-    return { rows: rows, problems: problems, pack: pack };
+    return { rows: rows, problems: problems, pack: pack, unplaced: unplaced };
   }
 
   function renderMake() {
@@ -1692,7 +1924,8 @@
       $('mkInfo').innerHTML = esc((DR.name ? DR.name + ': ' : '') + prints + ' print' + (prints === 1 ? '' : 's') + (plates ? ' on ' + plates + ' plate' + (plates > 1 ? 's' : '') + ' (' + BPS.maxPrint + ' mm bed)' : '') +
         (grams ? ', up to ≈ ' + Math.round(grams) + ' g of PLA (solid volume; the slicer gives the real figure)' : '') + '\n' + done + ' of ' + total + ' done.') +
         (bad ? '\n<span class="warn">Mesh check failed on ' + bad + ' bodies.</span>' : m.rows.length ? '\n<span class="ok">Mesh check passed.</span>' : '') +
-        (m.problems.length ? '\n<span class="warn">' + esc(m.problems.join('\n')) + '</span>' : '');
+        (m.problems.length ? '\n<span class="warn">' + esc(m.problems.join('\n')) + '</span>' : '') +
+        (m.unplaced && m.unplaced.length ? '\n' + esc('Not in the drawer, so not made: ' + m.unplaced.join(', ') + '.') : '');
       $('mk3mf').disabled = !plates; $('mkZip').disabled = !m.rows.length;
       $('mkDxf').hidden = DR.plate !== 'laser';
       S.views.make = { fit: true };
@@ -2153,6 +2386,7 @@
     cv.focus();
     var p = toWorld(e), v = vt();
     var panTool = S.phase === 'capture' && S.capView === 'trace' && S.capTool === 'pan';
+    if (S.phase === 'bins' && S.placing && e.button === 2) { rotatePlacing(1); return; }
     if (e.button === 1 || e.button === 2 || (S.space || panTool) && e.button === 0) { // pan
       if (!in3d()) { S.drag = { pan: true, sx: e.clientX, sy: e.clientY, vx: v.x, vy: v.y }; v.fit = false; cv.setPointerCapture(e.pointerId); }
       return;
@@ -2230,7 +2464,7 @@
       if (hitI || hitN) S.drag = { move: hitI || hitN, last: p, moved: false };
       draw();
     } else if (S.phase === 'bins') {
-      if (!binsPointerDown(p, v)) return;
+      if (!binsPointerDown(p, v, e)) return;
     } else return;
     cv.setPointerCapture(e.pointerId);
   });
@@ -2240,6 +2474,10 @@
     S.mouse = [e.clientX - rect.left, e.clientY - rect.top];
     if (!d) {
       if (S.phase === 'capture' && S.capView === 'trace' && STROKE_COLORS[S.capTool]) draw();
+      if (S.phase === 'bins' && S.placing) {
+        var at = placingAt(toWorld(e));
+        if (String(at) !== String(S.placing.at)) { S.placing.at = at; draw(); }
+      }
       if (S.phase === 'layout' && S.layTool === 'notch') {
         var wp2 = toWorld(e);
         S.notchPrev = hitNotch(wp2) ? null : notchTarget(wp2, e.altKey);
@@ -2293,7 +2531,11 @@
     else if (d.binNew || d.binMove || d.binResize) binsPointerUp(d);
     else draw();
   });
-  cv.addEventListener('pointerleave', function () { S.mouse = null; if (S.phase === 'capture') draw(); });
+  cv.addEventListener('pointerleave', function () {
+    S.mouse = null;
+    if (S.placing) S.placing.at = null;
+    if (S.phase === 'capture' || S.placing) draw();
+  });
   cv.addEventListener('dblclick', function (e) {
     if (S.phase === 'layout' && (hitItem(toWorld(e)) || hitNotch(toWorld(e)))) return;
     if (S.phase === 'capture' && S.capView === 'trace' && S.capTool === 'select' && S.cSel) {
@@ -2465,7 +2707,11 @@
     if (S.phase === 'generate' && k === 'g') generate();
     if (S.phase === 'bins') {
       var sb = selBin();
-      if (sb && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); removeBin(sb); }
+      if (S.placing) {
+        if (k === 'r') rotatePlacing(e.shiftKey ? -1 : 1);
+        else if (e.key === 'Escape') { S.placing = null; status('Stopped placing.'); draw(); }
+      } else if (sb && k === 'r') rotateBin(sb, e.shiftKey ? -1 : 1);
+      else if (sb && (e.key === 'Delete' || e.key === 'Backspace')) { e.preventDefault(); removeBin(sb); }
       else if (e.key === 'Escape') { S.binSel = null; renderBins(); draw(); }
     }
   });
@@ -2481,7 +2727,7 @@
   save(); // also syncs: older data's layout in L becomes the drawer's first tool bin
   TT.app = {
     S: S, L: L, C: C, runFrom: runFrom, setPhase: setPhase, addItem: addItem, generate: generate, fitGrid: fitGrid,
-    selectShape: selectShape, draw: draw, BPS: BPS, DR: DR, PRJ: PRJ, bpUpdate: bpUpdate, openToolBin: openToolBin, newBin: newBin, binsChanged: binsChanged, renderMake: renderMake,
+    selectShape: selectShape, draw: draw, BPS: BPS, DR: DR, PRJ: PRJ, bpUpdate: bpUpdate, openToolBin: openToolBin, newDesign: newDesign, placeDesign: placeDesign, rotateBin: rotateBin, startPlacing: startPlacing, binsChanged: binsChanged, renderMake: renderMake,
     // For the tutorial: copy the bin, and put a copy back (also removes library shapes by id).
     layoutState: function () { return JSON.parse(JSON.stringify(L)); },
     restore: function (state, dropIds) {

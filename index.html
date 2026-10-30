@@ -156,6 +156,7 @@
     <button data-phase="capture">Capture</button>
     <button data-phase="layout">Layout</button>
     <button data-phase="generate">Generate</button>
+    <button class="b primary" id="toolDone" title="Save this tool bin design and go back to Bins" hidden>Done ← Bins</button>
   </div>
   <div class="spacer"></div>
   <button class="b" id="tourBtn" title="A guided walk-through of the whole tool">Tutorial</button>
@@ -188,29 +189,41 @@
     <div class="btns"><button class="b primary" id="drNext">Next: baseplate →</button></div>
   </div>
 
-  <!-- 3. Bins: standard and tool bins placed on the drawer grid -->
+  <!-- 3. Bins: bin designs, and copies of them placed on the drawer grid -->
   <div class="panel" id="panel-bins" hidden>
-    <details class="sec" open data-key="bins"><summary>Bins</summary>
+    <details class="sec" open data-key="binDesigns"><summary>Bin designs</summary>
       <ul class="tips">
-        <li>Drag across empty cells to add a standard bin.</li>
-        <li>Drag a bin to move it, its corner dot to resize. <kbd>Delete</kbd> removes it.</li>
+        <li>Make a design, then <b>Place</b> it (or drag it onto the drawer), as many times as you like.</li>
+        <li>Changing a design changes every placed copy.</li>
       </ul>
-      <div class="btns"><button class="b" id="binAddTool" title="A bin with pockets shaped like your tools (photo → trace → layout)">Add tool bin</button><button class="b" id="binFill">Fill empty cells</button><button class="b" id="binClear">Remove all</button></div>
-      <div id="binNewCtls"></div>
-      <div class="shapelist" id="binList"></div>
-      <div id="binInfo" class="info"></div>
+      <div class="btns"><button class="b" id="desNewStd" title="A plain bin with optional compartments, label tab and scoop">+ Standard bin</button><button class="b" id="desNewTool" title="A bin with pockets shaped like your tools (photo → trace → layout)">+ Tool bin</button></div>
+      <div class="shapelist" id="desList"></div>
     </details>
-    <details class="sec" open id="binSel" hidden><summary id="binSelTitle">Selected bin</summary>
-      <div class="field"><label>Size (cells)</label><input type="number" id="binKx" min="1"><input type="number" id="binKy" min="1"></div>
-      <div class="field"><label>Height (7 mm units)</label><input type="number" id="binU" min="1"></div>
-      <div id="binStdOpts">
-        <div class="field"><label>Compartments across × deep</label><input type="number" id="binCx" min="1"><input type="number" id="binCy" min="1"></div>
-        <label class="check"><input type="checkbox" id="binLabel"> Label tab (along the back)</label>
-        <label class="check"><input type="checkbox" id="binScoop"> Finger scoop (front)</label>
+    <details class="sec" open id="desSec" hidden><summary id="desTitle">Design</summary>
+      <div class="field"><label>Name</label><input type="text" id="desName"></div>
+      <div class="field"><label>Size (cells)</label><input type="number" id="desKx" min="1"><input type="number" id="desKy" min="1"></div>
+      <div class="field"><label>Height (7 mm units)</label><input type="number" id="desU" min="1"></div>
+      <div id="desStdOpts">
+        <div class="field"><label>Compartments across × deep</label><input type="number" id="desCx" min="1"><input type="number" id="desCy" min="1"></div>
+        <label class="check"><input type="checkbox" id="desLabel"> Label tab (along the back)</label>
+        <label class="check"><input type="checkbox" id="desScoop"> Finger scoop (front)</label>
       </div>
-      <label class="check"><input type="checkbox" id="binLip"> Stacking lip</label>
-      <div class="btns"><button class="b primary" id="binEditTool">Edit tool layout →</button><button class="b" id="binDup">Duplicate</button><button class="b" id="binDel">Remove</button></div>
+      <label class="check"><input type="checkbox" id="desLip"> Stacking lip</label>
+      <div class="btns"><button class="b primary" id="desPlace" title="Put a copy in the drawer">Place in drawer</button><button class="b" id="desEditTool">Edit tools →</button><button class="b" id="desDup">Duplicate</button><button class="b" id="desDel">Delete</button></div>
+      <div class="hint" id="desInfo"></div>
+    </details>
+    <details class="sec" open id="binSel" hidden><summary id="binSelTitle">Placed bin</summary>
+      <div class="btns"><button class="b primary" id="binRot" title="Turn 90° (R; Shift+R the other way)">Rotate 90°</button><button class="b" id="binUnique" title="Give this copy its own design, so changes don't affect the others">Make unique</button><button class="b" id="binDel" title="Take it out of the drawer (Delete). The design stays.">Remove</button></div>
       <div class="hint" id="binSelInfo"></div>
+    </details>
+    <details class="sec" open data-key="bins"><summary>Drawer</summary>
+      <ul class="tips">
+        <li>Drag across empty cells for a plain bin.</li>
+        <li>Drag a bin to move it, its corner dot to resize. <kbd>R</kbd> rotates, <kbd>Delete</kbd> removes.</li>
+      </ul>
+      <div class="btns"><button class="b" id="binFill">Fill empty cells</button><button class="b" id="binClear" title="Take every bin out of the drawer; the designs stay">Clear drawer</button></div>
+      <div id="binNewCtls"></div>
+      <div id="binInfo" class="info"></div>
     </details>
   </div>
 
@@ -494,6 +507,14 @@
     <tr><td><kbd>Space</kbd> held, right-drag</td><td>Pan</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>Save project</td></tr>
     <tr><td><kbd>?</kbd></td><td>This list</td></tr>
+  </table>
+  <h3>Bins</h3>
+  <table>
+    <tr><td><kbd>R</kbd> / <kbd>Shift</kbd>+<kbd>R</kbd></td><td>Rotate the selected bin (or the one being placed) 90° / back</td></tr>
+    <tr><td>Right-click while placing</td><td>Rotate the bin being placed</td></tr>
+    <tr><td><kbd>Shift</kbd>+click while placing</td><td>Drop a copy and keep placing</td></tr>
+    <tr><td><kbd>Delete</kbd></td><td>Take the selected bin out of the drawer (its design stays)</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Stop placing, or deselect</td></tr>
   </table>
   <h3>Capture</h3>
   <table>
