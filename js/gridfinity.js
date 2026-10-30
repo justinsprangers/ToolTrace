@@ -9,7 +9,20 @@ var TT = window.TT = window.TT || {};
     pitch: 42, gap: 0.5, unitH: 7, radius: 3.75, baseH: 4.75, res: 0.2,
     // Foot profile (Gridfinity spec): 0.8 chamfer, 1.8 straight, 2.15 chamfer; ends 0.25 mm
     // inside the base slab so the bodies overlap.
-    foot: [[0, 0.8 + 2.15], [0.8, 2.15], [2.6, 2.15], [4.75, 0], [5.0, 0]]
+    foot: [[0, 0.8 + 2.15], [0.8, 2.15], [2.6, 2.15], [4.75, 0], [5.0, 0]],
+    // Stacking lip (gridfinity.xyz spec, as in gridfinity-rebuilt-openscad STACKING_LIP_LINE):
+    // from the inner tip 0.7 out at 45°, 1.8 up, 1.9 out at 45° to the outer edge, 4.4 above the
+    // bin top. Under the tip a 1.2 straight support, then 45° back to the outer wall.
+    lip: { low: 0.7, mid: 1.8, high: 1.9, support: 1.2 }
+  };
+
+  // Lip profile [d, z] for TT.sweep (d = inset from the bin outline): wall top at z, support
+  // clipped so it never reaches below zMin.
+  TT.lipProfile = function (z, zMin) {
+    var p = G.lip, depth = p.low + p.high, top = z + p.low + p.mid + p.high;
+    var v = Math.max(0, Math.min(p.support, z - zMin - depth)), h = z - v - zMin;
+    var under = (v > 0 ? [[depth, z - v]] : []).concat(h >= depth ? [[0, z - v - depth]] : [[depth - h, zMin], [0, zMin]]);
+    return [[0, top], [p.high, z + p.low + p.mid], [p.high, z + p.low], [depth, z]].concat(under);
   };
 
   TT.binSize = function (n) { return n * G.pitch - G.gap; };
@@ -253,6 +266,9 @@ var TT = window.TT = window.TT || {};
     return missing;
   }
 
+  // Shared with bins.js (standard bins).
+  TT.Mesh = Mesh; TT.loft = loft; TT.roundRect = roundRect; TT.prism = prism;
+
   // One printable bin. fields = TT.pocketFields(...). Returns {shells: [Float32Array], missingArea}.
   // Solid = feet + base slab up to the deepest pocket floor + one layer per pocket depth, each the
   // bin outline minus every pocket at least that deep.
@@ -306,7 +322,10 @@ var TT = window.TT = window.TT || {};
       missing += prism(layer, loops, z0 - 0.2, z1);
       shells.push(layer);
     });
-    return { shells: shells.map(function (s) { return new Float32Array(s.v); }), missingArea: missing };
+    shells = shells.map(function (s) { return new Float32Array(s.v); });
+    // Optional stacking lip on top of the outer edge (its support stays above the base).
+    if (L.lip) shells.push(TT.sweep(W / 2, H / 2, W / 2, H / 2, G.radius, TT.lipProfile(top, G.baseH)));
+    return { shells: shells, missingArea: missing };
   };
 
   // Every edge of a closed shell must be matched by the reverse edge. Returns unmatched count.

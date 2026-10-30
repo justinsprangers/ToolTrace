@@ -197,6 +197,7 @@ var TT = window.TT = window.TT || {};
     }
     return m.done();
   }
+  TT.sweep = sweep;
 
   function box(x0, y0, x1, y1, z0, z1) {
     var m = new Mesh(), c = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
