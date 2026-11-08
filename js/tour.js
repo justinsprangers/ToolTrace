@@ -35,7 +35,7 @@ var TT = window.TT = window.TT || {};
       for (var k = 0; k < 72; k++) { var a = (rev ? -1 : 1) * k / 72 * 2 * Math.PI; pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); }
       return pts;
     }
-    // A tool = filled parts (overlapping is fine) plus cut-outs in paper colour, with a soft shadow.
+    // A tool = filled parts (overlapping is fine) plus cut-outs in paper color, with a soft shadow.
     function tool(parts, cuts) {
       g.save(); g.translate(10, 14); g.filter = 'blur(6px)'; g.fillStyle = 'rgba(0,0,0,0.18)';
       parts.forEach(function (pt) { path([pt[0]]); g.fill(); });
@@ -49,7 +49,7 @@ var TT = window.TT = window.TT || {};
     var steel = '#50565c';
     tool([[circle(65, 52, 20), steel], [rect(58, 60, 72, 212), steel], [circle(65, 222, 16), steel]],
       [rect(57, 22, 73, 50), circle(65, 222, 7)]);
-    // Screwdriver: rounded red handle, grey shaft with a flat tip.
+    // Screwdriver: rounded red handle, gray shaft with a flat tip.
     var red = '#c0392b', shaft = '#8c939a', hnd = circle(160, 55, 15).filter(function (p) { return p[1] <= 55; });
     tool([[hnd.concat([[175, 55], [175, 140], [168, 148], [152, 148], [145, 140], [145, 55]]), red],
       [[[156, 146], [164, 146], [164, 245], [166, 255], [154, 255], [156, 245]], shaft]]);
@@ -77,7 +77,7 @@ var TT = window.TT = window.TT || {};
     { target: 'details[data-key=bpArea]', title: '2. Baseplate', html:
       '<ul><li>Style: <b>Ultralight</b> (least plastic), <b>Standard</b> (full profile) or <b>Magnet</b> (pockets for 6 × 2 mm magnets).</li><li><b>Pad edges</b> fills the drawer exactly; <b>one corner</b> keeps more pieces standard.</li><li><b>Max print size</b> is your bed size. Print the <b>test piece</b> first.</li></ul>', phase: 'baseplate' },
     { target: 'details[data-key=binDesigns]', title: '3. Bin designs', html:
-      '<ul><li><b>+ Standard bin</b> offers ready-made containers (cups, sorters, label trays, pocket bins); <b>+ Tool bin</b> traces your tools.</li><li>Click a design to change it, with a live 3D preview: compartments, labels, scoops, lip, magnets, walls and colours.</li><li><b>Place</b> (or drag it onto the drawer) puts in a copy; place as many as you like. <b>3D</b> above the drawer shows it all in place.</li></ul>', phase: 'bins' },
+      '<ul><li><b>+ Standard bin</b> offers ready-made containers (cups, sorters, label trays, pocket bins); <b>+ Tool bin</b> traces your tools.</li><li>Click a design to change it, with a live 3D preview: compartments, labels, scoops, lip, magnets and walls.</li><li><b>Place</b> (or drag it onto the drawer) puts in a copy; place as many as you like. <b>3D</b> above the drawer shows it all in place.</li></ul>', phase: 'bins' },
     { target: 'details[data-key=bins]', title: 'Bins in the drawer', html:
       '<ul><li>Click a bin, then <kbd>R</kbd> rotates it; drag to move, <kbd>Delete</kbd> takes it out.</li><li>Drag across empty cells for a plain bin; <b>Fill empty cells</b> does the rest.</li><li>Bins too tall for the drawer, or overlapping, turn red.</li></ul>', phase: 'bins' },
     { target: 'details[data-key=make]', title: '4. Make', wait: 2000, html:
@@ -217,7 +217,7 @@ var TT = window.TT = window.TT || {};
   }
 
   // Spotlight the step's control (opening its section and scrolling it into view) and put the card
-  // beside it, or centre the card when there's nothing to point at.
+  // beside it, or center the card when there's nothing to point at.
   function place() {
     var st = STEPS[idx], el = targetEl(st);
     if (el) {

@@ -32,9 +32,6 @@
   .menu small { color: var(--mute); font-size: 12px; }
   .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
   .minview { display: block; width: 100%; height: 190px; border-radius: 6px; background: #e7e7e3; margin: 2px 0 8px; cursor: grab; touch-action: none; }
-  .swatches { display: flex; gap: 10px; flex-wrap: wrap; }
-  .swatches label { display: flex; align-items: center; gap: 5px; font-size: 13px; }
-  .swatches input[type=color] { width: 34px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; cursor: pointer; }
   .phases button.parent { background: #e9ecef; border-color: #adb5bd; }
   header .spacer { flex: 1; }
   main { display: grid; grid-template-columns: 370px 1fr; flex: 1; min-height: 0; }
@@ -229,8 +226,6 @@
         <div class="field"><label>Walls</label><select id="desWall"><option value="0.8">Thin, 0.8 mm</option><option value="1.2">Standard, 1.2 mm</option><option value="1.6">Sturdy, 1.6 mm</option><option value="2">Thick, 2 mm</option></select></div>
         <div class="field"><label>Dividers</label><select id="desDivH"><option value="full">Full height</option><option value="half">Half height (easy reach)</option></select></div>
       </div>
-      <div class="field"><label>Colour</label><select id="desColor"></select></div>
-      <div class="field" id="desAccentRow"><label>Dividers and labels</label><select id="desAccent"></select></div>
       <div class="btns"><button class="b primary" id="desPlace" title="Put a copy in the drawer">Place in drawer</button><button class="b" id="desEditTool">Edit tools →</button><button class="b" id="desDup">Duplicate</button><button class="b" id="desDel">Delete</button></div>
       <div class="hint" id="desInfo"></div>
     </details>
@@ -246,10 +241,6 @@
       <div class="btns"><button class="b" id="binFill">Fill empty cells</button><button class="b" id="binClear" title="Take every bin out of the drawer; the designs stay">Clear drawer</button></div>
       <div id="binNewCtls"></div>
       <div id="binInfo" class="info"></div>
-    </details>
-    <details class="sec" data-key="filaments"><summary>Filament colours</summary>
-      <div class="swatches" id="filaments"></div>
-      <ul class="tips"><li>Each bin design and the baseplate print in one of 4 filament slots (Colour); a standard bin can put its dividers and labels on another.</li><li>The 3MF assigns each part to its slot. The colours here are only for the previews; load the real filaments in Bambu Studio.</li></ul>
     </details>
   </div>
 
@@ -497,7 +488,6 @@
         <button data-mode="magnet">Magnet</button>
       </div>
       <div class="hint" id="bpStyleNote"></div>
-      <div class="field"><label>Colour</label><select id="bpColor"></select></div>
       <div id="bpPrintCtls"></div>
       <div class="btns"><button class="b" data-reset="bpPrintCtls">Restore defaults</button></div>
       <ul class="tips"><li>Max print size: A1 mini 180 mm; A1, P1S, X1C 256 mm.</li><li>Every piece is at least <b>Min connected rows</b> cells in both directions when it fits.</li></ul>
@@ -587,16 +577,16 @@
   <table><tr><td><kbd>G</kbd></td><td>Generate model</td></tr></table>
 </dialog>
 <!-- ?v= makes browsers (and GitHub Pages' cache) fetch new scripts with a new page; bump it on every change. -->
-<script src="js/earcut.js?v=8"></script>
-<script src="js/vision.js?v=8"></script>
-<script src="js/grid.js?v=8"></script>
-<script src="js/gridfinity.js?v=8"></script>
-<script src="js/baseplate.js?v=8"></script>
-<script src="js/zip.js?v=8"></script>
-<script src="js/make.js?v=8"></script>
-<script src="js/preview3d.js?v=8"></script>
-<script src="js/bins.js?v=8"></script>
-<script src="js/app.js?v=8"></script>
-<script src="js/tour.js?v=8"></script>
+<script src="js/earcut.js?v=9"></script>
+<script src="js/vision.js?v=9"></script>
+<script src="js/grid.js?v=9"></script>
+<script src="js/gridfinity.js?v=9"></script>
+<script src="js/baseplate.js?v=9"></script>
+<script src="js/zip.js?v=9"></script>
+<script src="js/make.js?v=9"></script>
+<script src="js/preview3d.js?v=9"></script>
+<script src="js/bins.js?v=9"></script>
+<script src="js/app.js?v=9"></script>
+<script src="js/tour.js?v=9"></script>
 </body>
 </html>

@@ -29,7 +29,7 @@ var TT = window.TT = window.TT || {};
 
   // ---------- Layout helpers ----------
 
-  // A library shape's loops placed in the bin (item: x, y = centre in bin mm, rot in degrees).
+  // A library shape's loops placed in the bin (item: x, y = center in bin mm, rot in degrees).
   TT.placeLoops = function (shape, item) {
     var a = item.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
     return shape.loops.map(function (l) {
@@ -56,7 +56,7 @@ var TT = window.TT = window.TT || {};
     return b[0] === Infinity ? null : b;
   };
 
-  // Smallest bin around the layout with `wall` to spare, and the shift that centres it.
+  // Smallest bin around the layout with `wall` to spare, and the shift that centers it.
   TT.fitBin = function (L, lib) {
     var b = TT.layoutBox(L, lib);
     if (!b) return null;
@@ -96,7 +96,7 @@ var TT = window.TT = window.TT || {};
     return Math.max(1, Math.ceil((G.baseH + L.floor + TT.maxDepth(L)) / G.unitH));
   };
 
-  // Notch outline path: a circle (diameter d), or for a slot (len > d) the centre line of a
+  // Notch outline path: a circle (diameter d), or for a slot (len > d) the center line of a
   // stadium len long at angle ang (deg); stroke that with lineWidth d and round caps.
   TT.notchPath = function (ctx, n) {
     ctx.beginPath();
@@ -126,7 +126,7 @@ var TT = window.TT = window.TT || {};
 
   // For each depth level d (deepest first): signed distance (mm, negative = cut) of the union of
   // every pocket at least d deep, on a grid covering the bin with a 1 mm border. Sample (i, j)
-  // is at bin mm (-1 + i * res, -1 + j * res). Pockets are rasterised with canvas (clearance =
+  // is at bin mm (-1 + i * res, -1 + j * res). Pockets are rasterized with canvas (clearance =
   // a round-joined stroke), then turned into a distance field.
   TT.pocketFields = function (L, lib) {
     var res = G.res, W = TT.binSize(L.nx), H = TT.binSize(L.ny);
@@ -189,7 +189,7 @@ var TT = window.TT = window.TT || {};
     return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
   }
 
-  // Rounded rectangle centred at (cx, cy), counter-clockwise (y up).
+  // Rounded rectangle centered at (cx, cy), counter-clockwise (y up).
   function roundRect(cx, cy, w, h, r, seg) {
     var pts = [], corners = [[1, -1, -90], [1, 1, 0], [-1, 1, 90], [-1, -1, 180]];
     corners.forEach(function (k) {
@@ -306,10 +306,10 @@ var TT = window.TT = window.TT || {};
     return pts;
   }
 
-  // Magnet holes (Gridfinity spec: 6.5 mm across, 2.4 deep, 13 mm from the cell centre).
+  // Magnet holes (Gridfinity spec: 6.5 mm across, 2.4 deep, 13 mm from the cell center).
   G.magnet = { d: 6.5, depth: 2.4, at: 13 };
 
-  // One foot centred at (cx, cy); with magnets, 4 blind holes in its underside. Returns shells.
+  // One foot centered at (cx, cy); with magnets, 4 blind holes in its underside. Returns shells.
   TT.footShells = function (cx, cy, magnets) {
     var rings = G.foot.map(function (f) { return { z: f[0], pts: roundRect(cx, cy, 41.5 - 2 * f[1], 41.5 - 2 * f[1], G.radius - f[1], 8) }; });
     var m = new Mesh();
@@ -434,7 +434,7 @@ var TT = window.TT = window.TT || {};
 
   // 1:1 SVG (mm) of the bin outline(s) and the pocket outline at each depth.
   TT.svg = function (L, fields) {
-    var W = TT.binSize(L.nx), H = TT.binSize(L.ny), parts = [], colours = ['#ff0000', '#0000ff', '#00a000', '#ff8800'];
+    var W = TT.binSize(L.nx), H = TT.binSize(L.ny), parts = [], colors = ['#ff0000', '#0000ff', '#00a000', '#ff8800'];
     TT.pieces(L).forEach(function (pc) {
       parts.push('<rect x="' + (pc.ix * G.pitch) + '" y="' + (pc.iy * G.pitch) + '" width="' + TT.binSize(pc.kx) +
         '" height="' + TT.binSize(pc.ky) + '" rx="' + G.radius + '" stroke="#000000"/>');
@@ -442,7 +442,7 @@ var TT = window.TT = window.TT || {};
     fields.forEach(function (pf, k) {
       TT.contours(pf.f, pf.w, pf.h).forEach(function (l) {
         l = TT.simplify(l, 0.03);
-        parts.push('<path stroke="' + colours[k % colours.length] + '" d="M' + l.map(function (p) {
+        parts.push('<path stroke="' + colors[k % colors.length] + '" d="M' + l.map(function (p) {
           return (-1 + p[0] * pf.res).toFixed(3) + ' ' + (-1 + p[1] * pf.res).toFixed(3);
         }).join('L') + 'Z"/>');
       });

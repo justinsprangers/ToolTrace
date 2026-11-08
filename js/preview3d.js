@@ -9,7 +9,7 @@ var TT = window.TT = window.TT || {};
     var n = 0;
     meshes.forEach(function (m) { m.shells.forEach(function (s) { n += s.length; }); });
     var v = new Float32Array(n), col = new Uint8Array(n / 3), o = 0, b = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
-    var cols = [[215, 231, 245]], seen = {}; // [r, g, b]; 0 = the default blue-grey
+    var cols = [[215, 231, 245]], seen = {}; // [r, g, b]; 0 = the default blue-gray
     meshes.forEach(function (m) {
       var ci = 0;
       if (m.color) {

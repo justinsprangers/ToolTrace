@@ -1,5 +1,5 @@
 /* ToolTrace grid detection for cutting mats. Finds grid-line crossings, then numbers them by
-   growing a lattice outward from the centre (tolerates clutter, tools covering the grid, and
+   growing a lattice outward from the center (tolerates clutter, tools covering the grid, and
    mild perspective). Assumes the grid is roughly lined up with the photo edges (within ~15°). */
 var TT = window.TT = window.TT || {};
 (function () {
@@ -171,7 +171,7 @@ var TT = window.TT = window.TT || {};
     };
   }
 
-  // Number the crossings by growing a lattice of the given spacing from a seed near the centre.
+  // Number the crossings by growing a lattice of the given spacing from a seed near the center.
   function grow(peaks, spacing) {
     var w = 0, h = 0, k;
     peaks.forEach(function (p) { w = Math.max(w, p.x); h = Math.max(h, p.y); });

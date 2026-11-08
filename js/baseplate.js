@@ -187,7 +187,7 @@ var TT = window.TT = window.TT || {};
     return v;
   };
 
-  // Closed ring solid: profile [d, z] swept around a rounded rectangle (centre cx, cy, half
+  // Closed ring solid: profile [d, z] swept around a rounded rectangle (center cx, cy, half
   // sizes hw, hh, corner radius r); d is the inset from the rectangle's edge.
   function sweep(cx, cy, hw, hh, r, prof) {
     var m = new Mesh(), rings = [], corners = [[1, 1], [-1, 1], [-1, -1], [1, -1]];

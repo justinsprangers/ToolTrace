@@ -36,7 +36,7 @@ var TT = window.TT = window.TT || {};
   }
 
   // Least-squares homography (row-major 9 numbers) mapping `from` points onto `to` points
-  // (4 or more), with Hartley normalisation.
+  // (4 or more), with Hartley normalization.
   TT.homography = function (from, to) {
     function norm(pts) {
       var mx = 0, my = 0, d = 0;
@@ -164,7 +164,7 @@ var TT = window.TT = window.TT || {};
     if (!tl) return null;
     var quad = Math.abs(TT.loopArea([tl, tr, br, bl])), blob = lab.areas[big];
     if (blob < 0.05 * w * h || blob / quad < 0.85 || blob / quad > 1.15) return null;
-    // Use each extreme pixel's outer corner, not its centre.
+    // Use each extreme pixel's outer corner, not its center.
     return [[tl[0], tl[1]], [tr[0] + 1, tr[1]], [br[0] + 1, br[1] + 1], [bl[0], bl[1] + 1]]
       .map(function (p) { return [p[0] * step, p[1] * step]; });
   };
@@ -231,7 +231,7 @@ var TT = window.TT = window.TT || {};
     return s;
   };
 
-  // 4-connected labelling. labels[i] = component number + 1 (0 = background).
+  // 4-connected labeling. labels[i] = component number + 1 (0 = background).
   TT.components = function (mask, w, h) {
     var labels = new Int32Array(w * h), areas = [], stack = new Int32Array(w * h);
     for (var s = 0; s < w * h; s++) {
@@ -264,7 +264,7 @@ var TT = window.TT = window.TT || {};
 
   // ---------- Segmentation ----------
 
-  // Background colour per block, from pixels where `use` is set; empty blocks borrow from
+  // Background color per block, from pixels where `use` is set; empty blocks borrow from
   // their neighbours.
   function blockBackground(wp, use, bs) {
     var w = wp.w, h = wp.h, d = wp.data, bw = Math.ceil(w / bs), bh = Math.ceil(h / bs), i, j, k, c;
@@ -298,7 +298,7 @@ var TT = window.TT = window.TT || {};
       have = next;
       if (missing === before) break;
     }
-    // Expand to a per-pixel background image (bilinear between block centres).
+    // Expand to a per-pixel background image (bilinear between block centers).
     var bg = new Float32Array(w * h * 3);
     for (j = 0; j < h; j++) {
       var fy = Math.min(Math.max((j + 0.5) / bs - 0.5, 0), bh - 1), y0 = fy | 0, y1 = Math.min(y0 + 1, bh - 1), ty = fy - y0;
@@ -312,8 +312,8 @@ var TT = window.TT = window.TT || {};
     return bg;
   }
 
-  // How different each pixel is from its background colour. Chroma catches coloured or grey
-  // tools on a coloured mat; brightness catches dark tools on white paper.
+  // How different each pixel is from its background color. Chroma catches colored or gray
+  // tools on a colored mat; brightness catches dark tools on white paper.
   function score(wp, bg, lumWeight) {
     var n = wp.w * wp.h, s = new Float32Array(n), d = wp.data;
     for (var k = 0; k < n; k++) {
@@ -327,7 +327,7 @@ var TT = window.TT = window.TT || {};
     return s;
   }
 
-  // Score image for a warped photo: rough pass against the median edge colour, then a
+  // Score image for a warped photo: rough pass against the median edge color, then a
   // per-block background that skips the rough tool area. Slow part; cache it.
   TT.scoreImage = function (wp, threshold, lumWeight) {
     var w = wp.w, h = wp.h, n = w * h, res = wp.res, d = wp.data, i;
@@ -405,11 +405,11 @@ var TT = window.TT = window.TT || {};
           px[id[e]] = ex[e] + dx[e] * t; py[id[e]] = ey[e] + dy[e] * t;
         }
       }
-      var centreIn = (a + b + c + d) < 0;
+      var centerIn = (a + b + c + d) < 0;
       for (e = 0; e < 4; e++) {
         if (type[e] !== 1) continue;
         for (var s = 1; s < 4; s++) {
-          var k = centreIn ? (e + s) % 4 : (e - s + 4) % 4;
+          var k = centerIn ? (e + s) % 4 : (e - s + 4) % 4;
           if (type[k] === -1) { next[id[e]] = id[k]; starts.push(id[e]); break; }
         }
       }
@@ -620,9 +620,9 @@ var TT = window.TT = window.TT || {};
   // ---------- Traced shapes ----------
 
   // Raw (uncleaned) outlines of every blob in a mask, as shapes {raw: [outer, holes...], cx, cy,
-  // area, inside} in paper mm (y down). `inside` is a point inside the shape, used to recognise
+  // area, inside} in paper mm (y down). `inside` is a point inside the shape, used to recognize
   // the same shape after a re-trace. Edges are sub-pixel: the inside/outside decision comes from
-  // the mask, how far each pixel is from the edge from the colour score (lightly blurred).
+  // the mask, how far each pixel is from the edge from the color score (lightly blurred).
   TT.traceShapes = function (mask, wp, score, thr) {
     var w = wp.w + 2, h = wp.h + 2, f = new Float32Array(w * h).fill(1), i, j;
     for (j = 1; j < h - 1; j++) for (i = 1; i < w - 1; i++) {
@@ -676,7 +676,7 @@ var TT = window.TT = window.TT || {};
 
   // ---------- Symmetry ----------
 
-  // Rasterise loops (even-odd) on a grid: pixel (i, j) centre = (x0 + (i + 0.5) g, y0 + (j + 0.5) g).
+  // Rasterize loops (even-odd) on a grid: pixel (i, j) center = (x0 + (i + 0.5) g, y0 + (j + 0.5) g).
   function rasterLoops(loops, x0, y0, w, h, g) {
     var c = document.createElement('canvas');
     c.width = w; c.height = h;

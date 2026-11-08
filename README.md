@@ -13,19 +13,18 @@ One project = one drawer. It's saved in your browser automatically; **Save proje
 
 ## Bins
 Designing a bin and putting it in the drawer are separate: you keep a list of **bin designs**, then place copies of them.
-- **Bin designs:** **+ Standard bin ▾** offers ready-made containers: plain bins, small-parts cups, a screw sorter, a label tray, a deep bin, a magnet bin, and a **Pocket bin** (simple shape pockets, see Layout). Click a design to change it, with a **live 3D preview** at the top of its panel (drag to turn, scroll to zoom, double-click to reset): **name**, **size**, **height** (7 mm units), **compartments** (across × deep), **label tab** (along the back of each row, 45° underside so it prints without support), **finger scoop** (curved front of each row), **stacking lip**, **magnet holes** (6 × 2 mm magnets, 4 per cell), **walls** (0.8 to 2 mm), **dividers** (full or half height) and **colour** (filament 1–4, plus a second filament for dividers and labels). **+ Tool bin** opens the Tool bin steps below (they only show in the header while you're editing a tool bin); press **Done ← Bins** (top) when finished. A new tool bin left with no tools is discarded. Double-click a tool design, or press **Edit tools**, to go back to it. Changing a design changes every placed copy.
+- **Bin designs:** **+ Standard bin ▾** offers ready-made containers: plain bins, small-parts cups, a screw sorter, a label tray, a deep bin, a magnet bin, and a **Pocket bin** (simple shape pockets, see Layout). Click a design to change it, with a **live 3D preview** at the top of its panel (drag to turn, scroll to zoom, double-click to reset): **name**, **size**, **height** (7 mm units), **compartments** (across × deep), **label tab** (along the back of each row, 45° underside so it prints without support), **finger scoop** (curved front of each row), **stacking lip**, **magnet holes** (6 × 2 mm magnets, 4 per cell), **walls** (0.8 to 2 mm) and **dividers** (full or half height). **+ Tool bin** opens the Tool bin steps below (they only show in the header while you're editing a tool bin); press **Done ← Bins** (top) when finished. A new tool bin left with no tools is discarded. Double-click a tool design, or press **Edit tools**, to go back to it. Changing a design changes every placed copy.
 - **Place:** press **Place** on a design (or drag it from the list onto the drawer). A ghost follows the pointer: blue fits, red doesn't. Click to drop it; **R** or right-click turns it 90°, Shift-click keeps placing, Esc stops.
 - **In the drawer:** click a bin, then **R** rotates it (Shift+R the other way), drag moves it, its corner dot resizes its design, and **Delete** takes it out (the design stays). **Make unique** gives one copy its own design. Dragging across empty cells makes a plain bin; **Fill empty cells** packs every gap with bins up to the size you set, biggest first. Both reuse a matching plain design instead of making new ones.
 - Red outlines: the bin overlaps another, sits outside the grid, is taller than the drawer, or is a tool bin with no tools yet.
 - Only placed designs are made; Make lists the rest as not in the drawer. Tool bins too big for your bed (Max print size) are split into pieces that fit.
-- **Plan / 3D** above the drawer: **3D** shows the drawer with its baseplate and every bin in place, in their filament colours (drag to turn, scroll to zoom, double-click to reset). Bins made by dragging or Fill disappear from the list when their last copy is removed.
-- **Filament colours** (bottom of the panel): the preview colour of each filament slot.
+- **Plan / 3D** above the drawer: **3D** shows the drawer with its baseplate and every bin in place (drag to turn, scroll to zoom, double-click to reset). Bins made by dragging or Fill disappear from the list when their last copy is removed.
 - The canvas toolbar shows **Rotate 90°** and **Remove from drawer** for the selected bin, and **Rotate** / **Stop placing** while placing.
 
 ## Make
 - One list of everything: **test** items first (baseplate test piece or laser hole-size strip), then the **baseplate**, then the **bins**, with how many of each. Identical bins are listed once with a count.
-- **Bambu 3MF (all plates):** every print packed onto build plates (bed size = **Max print size** on the Baseplate tab) in one Bambu Studio file. Each print is on its filament slot; a bin with a second colour has its dividers and labels as a separate part on the other slot. Open it, load your filaments, and slice each plate. Each row's **3MF** button saves just that print. If the plates look wrong in your version of Bambu Studio, use the STL zip and Arrange instead.
-- **STL zip (other slicers):** every file, named with how many to print (one colour; STL can't carry colours). **Laser DXF** for a laser-cut plate.
+- **Bambu 3MF (all plates):** every print packed onto build plates (bed size = **Max print size** on the Baseplate tab) in one Bambu Studio file. Open it, pick your printer and filament, and slice each plate. Each row's **3MF** button saves just that print. If the plates look wrong in your version of Bambu Studio, use the STL zip and Arrange instead.
+- **STL zip (other slicers):** every file, named with how many to print. **Laser DXF** for a laser-cut plate.
 - Tick items off as you finish them; ticks are saved with the project. The filament figure is the solid volume, so it's an upper bound; the slicer gives the real number.
 
 ## Tool bin 1. Capture: photo → outlines
@@ -91,11 +90,11 @@ Press **?** (or **Shortcuts** above the picture) for every keyboard shortcut.
 
 ## Baseplate: a Gridfinity grid for the drawer
 Fills the drawer with a printed Gridfinity baseplate, split into pieces that fit your printer, or makes a laser-cut sheet.
-- **Style:** **Ultralight** (walls only, 4.25 mm, least filament), **Standard** (the full Gridfinity profile, 4.65 mm, stiffer), or **Magnet** (the standard profile on a 3 mm floor with a 6 × 2 mm magnet pocket under each bin foot's 4 magnet spots; bins sit 3 mm higher, which the height checks include). **Colour** picks its filament slot.
+- **Style:** **Ultralight** (walls only, 4.25 mm, least filament), **Standard** (the full Gridfinity profile, 4.65 mm, stiffer), or **Magnet** (the standard profile on a 3 mm floor with a 6 × 2 mm magnet pocket under each bin foot's 4 magnet spots; bins sit 3 mm higher, which the height checks include).
 - Downloads are 3MF: all pieces on plates, one per different print, and the test piece.
 - The area comes from the **Drawer** tab. Only whole 42 mm cells are used.
 - **Pad edges to fill** gives the outer pieces a frame (an outer wall tied to the grid by a rib on each grid line) so the plate fills the area exactly. **Leave gap** leaves the leftover space empty. **Fit clearance** is the total slack left so the plate drops in (0.5 mm default).
-- **Leftover split evenly** centres the grid. **Leftover in one corner** puts all the padding (or gap) at the corner you pick (front = bottom of the plan), so the other edges are plain cells and more pieces are the same standard print.
+- **Leftover split evenly** centers the grid. **Leftover in one corner** puts all the padding (or gap) at the corner you pick (front = bottom of the plan), so the other edges are plain cells and more pieces are the same standard print.
 - **Max print size:** the largest piece your bed takes (A1 mini 180 mm; A1, P1S, X1C 256 mm). Padding counts toward it.
 - **Min connected rows:** each piece is at least this many cells in both directions (default 2), unless the area or bed is too small; the panel says when.
 - **Pieces** lists each different print with how many to make. Pieces that are the same print turned on the bed are merged. **Plan** shows where each piece goes (letters match the list), **3D** shows them all.
@@ -109,7 +108,7 @@ Fills the drawer with a printed Gridfinity baseplate, split into pieces that fit
 - Standard bins: 1.2 mm floor and compartment walls; outer walls 0.8–2 mm (1.2 default).
 - Tool bins: pockets have straight walls with a chamfered top edge. Each tool can have its own depth, and where pockets overlap the deeper one wins.
 - Stacking lip (optional, on both kinds): the Gridfinity spec profile (0.7 / 1.8 / 1.9 mm), 4.4 mm above the bin's top.
-- Magnet holes (optional, on both kinds): 6.5 mm across, 2.4 mm deep, 13 mm from each cell's centre, for 6 × 2 mm magnets.
+- Magnet holes (optional, on both kinds): 6.5 mm across, 2.4 mm deep, 13 mm from each cell's center, for 6 × 2 mm magnets.
 - Simple-shape pockets (Layout tab): rectangles, rounded rectangles, circles, slots and hexagons, added like traced tools.
 - Each STL is several overlapping closed bodies (feet, base, walls, ...). Slicers merge them when slicing.
 

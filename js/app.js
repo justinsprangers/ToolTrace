@@ -41,7 +41,7 @@
   function fmt(mm) { return mm.toFixed(1) + ' mm (' + (mm / 25.4).toFixed(2) + ' in)'; }
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
-  // Labelled number box + slider, kept in sync. The number box accepts values past the slider range.
+  // Labeled number box + slider, kept in sync. The number box accepts values past the slider range.
   var C = {};
   // A blue tick on the slider marks the default (recommended) value; ↺ appears once it's changed.
   function ctl(parent, id, label, min, max, step, value, unit, onInput) {
@@ -151,11 +151,11 @@
     return [b[2] - b[0], b[3] - b[1]];
   }
 
-  // Save prints as one Bambu 3MF (items: [{name, shells, extruder} or {name, parts}]), packed onto
+  // Save prints as one Bambu 3MF (items: [{name, shells}]), packed onto
   // plates of the Max print size (bigger when one print needs it).
   function save3mf(base, items) {
     items.forEach(function (it) {
-      var f = footprint(it.parts ? [].concat.apply([], it.parts.map(function (q) { return q.shells; })) : it.shells);
+      var f = footprint(it.shells);
       it.w = f[0]; it.h = f[1];
     });
     var bed = Math.max(BPS.maxPrint, Math.max.apply(null, items.map(function (it) { return Math.max(it.w, it.h) + 12; })));
@@ -272,7 +272,7 @@
 
   // ---------- 1. Capture ----------
 
-  // Fix tools: same names, keys and colours as LaserEngraver. [id, label, key, tooltip]
+  // Fix tools: same names, keys and colors as LaserEngraver. [id, label, key, tooltip]
   var CAP_TOOLS = [
     ['select', 'Select', 'V', 'Click a shape to select it, then drag its nodes; click the outline to add a node'],
     ['pan', 'Pan', 'P', 'Drag to pan'],
@@ -1042,7 +1042,7 @@
 
   // ---------- Simple shapes: pockets that aren't traced ----------
 
-  // Outline (mm, centred) of a simple shape: rect / round / circle / slot / hex (w = across flats).
+  // Outline (mm, centered) of a simple shape: rect / round / circle / slot / hex (w = across flats).
   function simpleLoop(kind, w, h) {
     if (kind === 'circle') return TT.circle(0, 0, w / 2, 48).reverse();
     if (kind === 'hex') {
@@ -1149,9 +1149,8 @@
       box.appendChild(b);
     }
     function name(m, k) { return base + '_' + m.pc.kx + 'x' + m.pc.ky + 'x' + L.units + (many ? '_part' + (k + 1) : '') + '.stl'; }
-    var d = designById(S.curDesign), ext = d ? d.opt.color || 1 : 1;
     button((many ? 'All ' + S.gen.meshes.length + ' pieces' : 'Bin') + ' (3MF)', function () {
-      save3mf(base + '_' + L.nx + 'x' + L.ny + 'x' + L.units, S.gen.meshes.map(function (m, k) { return { name: base + (many ? ' part ' + (k + 1) : ''), shells: m.shells, extruder: ext }; }));
+      save3mf(base + '_' + L.nx + 'x' + L.ny + 'x' + L.units, S.gen.meshes.map(function (m, k) { return { name: base + (many ? ' part ' + (k + 1) : ''), shells: m.shells }; }));
     }, true);
     S.gen.meshes.forEach(function (m, k) {
       var pw = TT.binSize(m.pc.kx), ph = TT.binSize(m.pc.ky);
@@ -1165,18 +1164,18 @@
   // All sizes in mm; drawer.unit only changes how sizes are shown and typed. Saved in localStorage
   // (`tooltrace.project`) and in project files. bins: see the Bins tab; done: Make checklist ticks.
   var DR = { name: '', w: 500, d: 400, h: 60, unit: 1, plate: 'print' };
-  var BPS = { clearance: 0.5, fill: true, oneCorner: false, corner: 'rb', maxPrint: 180, minRows: 2, hole: 37.5, kerf: 0.15, style: 'ultralight', color: 1 };
-  // colors: preview colours of the 4 filament slots (designs and the baseplate pick a slot).
-  var FILAMENTS = ['#c5ccd6', '#f59f00', '#1c7ed6', '#3b3b3b'];
-  var PRJ = { drawer: DR, baseplate: BPS, designs: [], bins: [], done: {}, colors: FILAMENTS.slice() };
+  var BPS = { clearance: 0.5, fill: true, oneCorner: false, corner: 'rb', maxPrint: 180, minRows: 2, hole: 37.5, kerf: 0.15, style: 'ultralight' };
+  var PRJ = { drawer: DR, baseplate: BPS, designs: [], bins: [], done: {} };
+  // 3D view colors: baseplate, standard bins, tool bins (same hues as the plan view).
+  var COLOR3D = { plate: '#c5ccd6', std: '#8fbfee', tool: '#f2b27a' };
   function loadProject(d) {
     if (!d) return;
     if (d.drawer) Object.assign(DR, d.drawer);
     if (d.baseplate) Object.assign(BPS, d.baseplate);
     PRJ.done = d.done || {}; PRJ.cur = d.cur || null;
-    PRJ.colors = d.colors && d.colors.length === 4 ? d.colors : FILAMENTS.slice();
+    delete BPS.color; // from the removed filament-color option
     if (d.designs) { PRJ.designs = d.designs; PRJ.bins = d.bins || []; } else migrateBins(d.bins || [], d.cur);
-    PRJ.designs.forEach(function (x) { x.opt = Object.assign(optDefaults(x.kind), x.opt); });
+    PRJ.designs.forEach(function (x) { x.opt = Object.assign(optDefaults(x.kind), x.opt); delete x.opt.color; delete x.opt.accent; });
     PRJ.bins = PRJ.bins.filter(function (b) { b.rot = b.rot || 0; return PRJ.designs.some(function (x) { return x.id === b.design; }); });
   }
   // Before designs, each bin in the drawer was its own design: each becomes a design plus one
@@ -1234,7 +1233,6 @@
   // How far the baseplate raises the bins off the drawer floor (the magnet plate's floor).
   function plateLift() { return DR.plate === 'print' ? bpStyle().lift : 0; }
   function bpStyle() { return TT.BP.styles[BPS.style] || TT.BP.styles.ultralight; }
-  function filament(n) { return PRJ.colors[(n || 1) - 1] || PRJ.colors[0]; }
 
   function drawerInfo() {
     var p = S.bp, P = TT.BP.pitch, lines = [];
@@ -1250,7 +1248,7 @@
 
   // ---------- Baseplate ----------
 
-  var BP_COLOURS = ['#ffd8a8', '#a5d8ff', '#b2f2bb', '#ffc9c9', '#d0bfff', '#fcc2d7', '#99e9f2', '#ffec99'];
+  var BP_COLORS = ['#ffd8a8', '#a5d8ff', '#b2f2bb', '#ffc9c9', '#d0bfff', '#fcc2d7', '#99e9f2', '#ffec99'];
   S.bpView = 'plan'; S.bp = null; S.bpPreview = null;
 
   ctl('bpAreaCtls', 'bpClear', 'Fit clearance (total)', 0, 3, 0.1, 0.5, 'mm', function (v) { BPS.clearance = Math.max(0, v); bpChanged(); });
@@ -1282,19 +1280,8 @@
       standard: 'The full Gridfinity profile, 4.65 mm tall: stiffer, holds bins more firmly.',
       magnet: 'Standard profile on a 3 mm floor with 6 × 2 mm magnet pockets under every bin foot. Pair with magnet bins. Bins sit 3 mm higher.'
     }[BPS.style] || '';
-    colorSelect($('bpColor'), BPS.color || 1);
   }
-
-  // Fill a <select> with the 4 filament slots (plus "Same as the bin" when same is given).
-  function colorSelect(sel, value, same) {
-    var html = (same ? '<option value="0">' + same + '</option>' : '');
-    PRJ.colors.forEach(function (c, i) { html += '<option value="' + (i + 1) + '">Filament ' + (i + 1) + '</option>'; });
-    if (sel.innerHTML !== html) sel.innerHTML = html;
-    sel.value = String(value || 0);
-    sel.style.borderLeft = '10px solid ' + (+sel.value ? filament(+sel.value) : 'transparent');
-  }
-  segButtons('bpStyle', function (m) { BPS.style = m; bpInputs(); bpChanged(); if (S.bins3d) S.bins3d = null; });
-  $('bpColor').onchange = function () { BPS.color = +this.value; bpInputs(); saveProject(); S.make = null; S.bpPreview = null; S.bins3d = null; bpPreview(); draw(); };
+  segButtons('bpStyle', function (m) { BPS.style = m; bpInputs(); bpChanged(); });
   bpInputs();
   segButtons('bpFill', function (m) { BPS.fill = m === 'pad'; bpChanged(); });
   segButtons('bpAlign', function (m) { BPS.oneCorner = m === 'corner'; $('bpCornerRow').hidden = !BPS.oneCorner; bpChanged(); });
@@ -1304,7 +1291,7 @@
   function projectLoaded() {
     bpInputs();
     C.bpClear.set(BPS.clearance); C.bpMax.set(BPS.maxPrint); C.bpMin.set(BPS.minRows); C.bpHole.set(BPS.hole); C.bpKerf.set(BPS.kerf);
-    renderFilaments(); saveProject(); bpUpdate();
+    saveProject(); bpUpdate();
   }
 
   function bpChanged() {
@@ -1347,7 +1334,7 @@
       b.className = 'b' + (primary ? ' primary' : ''); b.textContent = label; b.onclick = fn;
       box.appendChild(b);
     }
-    function item(t, nm) { return { name: nm, shells: t.mesh.shells, extruder: BPS.color || 1 }; }
+    function item(t, nm) { return { name: nm, shells: t.mesh.shells }; }
     button('All ' + p.pieces.length + ' pieces (3MF, on plates)', function () {
       var all = [];
       p.types.forEach(function (t) { for (var c = 0; c < t.count; c++) all.push(item(t, 'Baseplate ' + t.label + (t.count > 1 ? ' #' + (c + 1) : ''))); });
@@ -1359,7 +1346,7 @@
     });
     var tp = bpTestPiece(p);
     button('Test piece: ' + tp.kx + ' × ' + tp.ky + (tp.pad.some(Boolean) ? ' padded corner' : '') + ' (print this first)', function () {
-      save3mf('baseplate_test_' + tp.kx + 'x' + tp.ky, [{ name: 'Baseplate test piece', shells: TT.bpMesh(tp, BPS.style).shells, extruder: BPS.color || 1 }]);
+      save3mf('baseplate_test_' + tp.kx + 'x' + tp.ky, [{ name: 'Baseplate test piece', shells: TT.bpMesh(tp, BPS.style).shells }]);
     });
     bpPreview(); draw();
   }
@@ -1380,7 +1367,7 @@
     S.bpPreview = new TT.Preview3D(p.pieces.map(function (pc) {
       var k = pc.kx + 'x' + pc.ky + ':' + pc.pad.join(',');
       if (!S.bpOrient[k]) S.bpOrient[k] = TT.bpMesh(pc, BPS.style);
-      return { shells: S.bpOrient[k].shells, ox: pc.x + pc.col * 3, oy: pc.y + pc.row * 3, color: filament(BPS.color) };
+      return { shells: S.bpOrient[k].shells, ox: pc.x + pc.col * 3, oy: pc.y + pc.row * 3, color: COLOR3D.plate };
     }));
   }
 
@@ -1438,10 +1425,9 @@
     return d;
   }
 
-  // Design options: compartments, label tab, scoop, lip, magnet holes, wall (mm), divider height,
-  // filament slot (color) and a second slot for dividers and labels (accent, 0 = same).
+  // Design options: compartments, label tab, scoop, lip, magnet holes, wall (mm), divider height.
   function optDefaults(kind) {
-    return { cx: 1, cy: 1, label: false, scoop: false, lip: kind === 'std', magnets: false, wall: 1.2, divH: 'full', color: 1, accent: 0 };
+    return { cx: 1, cy: 1, label: false, scoop: false, lip: kind === 'std', magnets: false, wall: 1.2, divH: 'full' };
   }
 
   // Ready-made standard containers for "+ Standard bin". units: a number, or 'max' (tallest that fits).
@@ -1451,7 +1437,7 @@
     { name: '', title: 'Plain bin', note: '2 × 2', kx: 2, ky: 2, opt: {} },
     { name: 'Small-parts cups', note: '2 × 2: 4 cups with scoops and labels', kx: 2, ky: 2, opt: { cx: 2, cy: 2, scoop: true, label: true } },
     { name: 'Screw sorter', note: '3 × 2: 6 compartments, half-height dividers, scoops', kx: 3, ky: 2, units: 3, opt: { cx: 3, cy: 2, scoop: true, divH: 'half' } },
-    { name: 'Label tray', note: '3 × 1: 3 labelled compartments', kx: 3, ky: 1, opt: { cx: 3, label: true, scoop: true } },
+    { name: 'Label tray', note: '3 × 1: 3 labeled compartments', kx: 3, ky: 1, opt: { cx: 3, label: true, scoop: true } },
     { name: 'Deep bin', note: '2 × 2, as tall as the drawer allows, scoop and label', kx: 2, ky: 2, units: 'max', opt: { scoop: true, label: true } },
     { name: 'Magnet bin', note: '1 × 1 with magnet holes (for a Magnet baseplate)', kx: 1, ky: 1, opt: { magnets: true } }
   ];
@@ -1675,10 +1661,8 @@
       setVal('desCx', d.opt.cx); setVal('desCy', d.opt.cy);
       $('desLabel').checked = d.opt.label; $('desScoop').checked = d.opt.scoop; $('desLip').checked = d.opt.lip;
       $('desMag').checked = !!d.opt.magnets;
-      $('desStdMore').hidden = $('desAccentRow').hidden = d.kind === 'tool';
+      $('desStdMore').hidden = d.kind === 'tool';
       $('desWall').value = String(d.opt.wall || 1.2); $('desDivH').value = d.opt.divH || 'full';
-      colorSelect($('desColor'), d.opt.color || 1);
-      colorSelect($('desAccent'), d.opt.accent || 0, 'Same as the bin');
       $('desEditTool').hidden = d.kind !== 'tool';
       later('desView', drawDesView, 60);
       $('desInfo').textContent = (d.kind === 'tool' ? 'Size comes from the tool layout. ' : '') + dims([TT.binSize(d.kx), TT.binSize(d.ky), binTop(d)]) + '. ' +
@@ -1750,8 +1734,6 @@
   };
   $('desWall').onchange = function () { var d = selDesign(); if (d) { d.opt.wall = +this.value; binsChanged(); } };
   $('desDivH').onchange = function () { var d = selDesign(); if (d) { d.opt.divH = this.value; binsChanged(); } };
-  $('desColor').onchange = function () { var d = selDesign(); if (d) { d.opt.color = +this.value; binsChanged(); } };
-  $('desAccent').onchange = function () { var d = selDesign(); if (d) { d.opt.accent = +this.value; binsChanged(); } };
   $('desPlace').onclick = function () { var d = selDesign(); if (d) startPlacing(d); };
   $('desEditTool').onclick = function () { var d = selDesign(); if (d) openToolBin(d.id); };
   $('desDel').onclick = function () {
@@ -1824,7 +1806,7 @@
   }
   function stopPlacing() { S.placing = null; status('Stopped placing.'); renderBins(); draw(); }
   function placingFoot() { return turned(designById(S.placing.design), S.placing.rot); }
-  // Front-left cell for the ghost: centred on the cell under the pointer, kept inside the grid.
+  // Front-left cell for the ghost: centered on the cell under the pointer, kept inside the grid.
   function placingAt(w) {
     var p = S.bp, f = placingFoot(), c = cellAt(w);
     if (w[0] < 0 || w[1] < 0 || w[0] > p.w || w[1] > p.d) return null;
@@ -2033,32 +2015,24 @@
       });
     }
     ctx.restore();
-    // Filament dots (only when it isn't plain filament 1): the bin's, then its dividers'.
-    var dots = [d.opt.color || 1].concat(d.opt.accent && d.kind === 'std' ? [d.opt.accent] : []);
-    if (dots.length > 1 || dots[0] !== 1) dots.forEach(function (n, k) {
-      ctx.beginPath(); ctx.arc(7 + k * 9, H - 7, 3.5, 0, 7);
-      ctx.fillStyle = filament(n); ctx.fill(); ctx.strokeStyle = '#333'; ctx.lineWidth = px; ctx.stroke();
-    });
   }
 
   // ---------- 3D: a design on its own, and the whole drawer ----------
 
-  // A design's mesh in bin coordinates (front-left corner at 0, 0, y towards the back):
-  // {body, accent} shell lists. Cached by everything that shapes it.
+  // A design's mesh in bin coordinates (front-left corner at 0, 0, y towards the back): a shell
+  // list. Cached by everything that shapes it.
   var meshCache = new Map();
   function designLayout(d) { return d.id === S.curDesign && !TT.tourOpen ? L : d.layout; }
   function designMesh(d) {
     var key = d.kind + JSON.stringify([d.kx, d.ky, d.units, d.opt, d.kind === 'tool' ? designLayout(d) : 0]), m = meshCache.get(key);
     if (m) return m;
-    if (d.kind === 'std') {
-      var r = TT.stdBinMesh(Object.assign({ kx: d.kx, ky: d.ky, units: d.units }, d.opt));
-      m = { body: r.body, accent: r.accent };
-    } else {
+    if (d.kind === 'std') m = TT.stdBinMesh(Object.assign({ kx: d.kx, ky: d.ky, units: d.units }, d.opt)).shells;
+    else {
       // Every printed piece, put back where it sits in the bin.
-      m = { body: [], accent: [] };
+      m = [];
       toolBinPieces(d).forEach(function (q) {
         var dx = q.pc.ix * G.pitch, dy = (d.ky - q.pc.iy - q.pc.ky) * G.pitch;
-        q.mesh.shells.forEach(function (s) { m.body.push(moved(s, 0, dx, dy, 0, 0, 0)); });
+        q.mesh.shells.forEach(function (s) { m.push(moved(s, 0, dx, dy, 0, 0, 0)); });
       });
     }
     if (meshCache.size > 40) meshCache.delete(meshCache.keys().next().value);
@@ -2083,10 +2057,9 @@
   function drawDesView() {
     var d = selDesign(), c = $('desView');
     if (!d || $('desSec').hidden || !c.clientWidth) return;
-    var key = JSON.stringify([d.kind, d.kx, d.ky, d.units, d.opt, PRJ.colors, d.kind === 'tool' ? designLayout(d) : 0]);
+    var key = JSON.stringify([d.kind, d.kx, d.ky, d.units, d.opt, d.kind === 'tool' ? designLayout(d) : 0]);
     if (S.desPrevKey !== key) {
-      var m = designMesh(d), col = filament(d.opt.color);
-      S.desPrev = new TT.Preview3D([{ shells: m.body, color: col }].concat(m.accent.length ? [{ shells: m.accent, color: d.opt.accent ? filament(d.opt.accent) : col }] : []));
+      S.desPrev = new TT.Preview3D([{ shells: designMesh(d), color: COLOR3D[d.kind] }]);
       S.desPrevKey = key;
     }
     Object.assign(S.desPrev, desOrbit);
@@ -2108,7 +2081,7 @@
     c.addEventListener('dblclick', function () { desOrbit.yaw = -0.6; desOrbit.pitch = 0.75; desOrbit.zoom = 1; drawDesView(); });
   })();
 
-  // The drawer in 3D: floor, baseplate (or laser sheet) and every placed bin in its colours.
+  // The drawer in 3D: floor, baseplate (or laser sheet) and every placed bin.
   function buildBins3d() {
     var p = S.bp, P = G.pitch, meshes = [], m = new TT.Mesh(), fl = [[0, 0], [p.w, 0], [p.w, p.d], [0, p.d]];
     TT.loft(m, [{ z: -2, pts: fl }, { z: -0.05, pts: fl }]);
@@ -2116,7 +2089,7 @@
     if (DR.plate === 'print') p.pieces.forEach(function (pc) {
       var k = pc.kx + 'x' + pc.ky + ':' + pc.pad.join(',');
       if (!S.bpOrient[k]) S.bpOrient[k] = TT.bpMesh(pc, BPS.style);
-      meshes.push({ shells: S.bpOrient[k].shells, ox: pc.x, oy: pc.y, color: filament(BPS.color) });
+      meshes.push({ shells: S.bpOrient[k].shells, ox: pc.x, oy: pc.y, color: COLOR3D.plate });
     });
     else if (DR.plate === 'laser' && S.bpLaser) {
       var lm = new TT.Mesh();
@@ -2125,34 +2098,14 @@
     }
     var lift = plateLift();
     PRJ.bins.forEach(function (b) {
-      var d = designOf(b), dm = designMesh(d), f = foot(b), W = TT.binSize(d.kx), H = TT.binSize(d.ky);
+      var d = designOf(b), f = foot(b), W = TT.binSize(d.kx), H = TT.binSize(d.ky);
       var cx = p.grid[0] + (b.x + f[0] / 2) * P, cy = p.grid[1] + (b.y + f[1] / 2) * P;
-      function place(s) { return moved(s, b.rot, cx - W / 2, cy - H / 2, lift, W / 2, H / 2); }
-      var col = filament(d.opt.color);
-      meshes.push({ shells: dm.body.map(place), color: col });
-      if (dm.accent.length) meshes.push({ shells: dm.accent.map(place), color: d.opt.accent ? filament(d.opt.accent) : col });
+      meshes.push({ shells: designMesh(d).map(function (s) { return moved(s, b.rot, cx - W / 2, cy - H / 2, lift, W / 2, H / 2); }), color: COLOR3D[d.kind] });
     });
     var pv = new TT.Preview3D(meshes);
     if (S.bins3dView) Object.assign(pv, S.bins3dView);
     return pv;
   }
-
-  // Filament slot colours (previews only).
-  function renderFilaments() {
-    var box = $('filaments');
-    box.innerHTML = '';
-    PRJ.colors.forEach(function (c, i) {
-      var l = document.createElement('label');
-      l.innerHTML = '<input type="color" value="' + c + '"> ' + (i + 1);
-      l.querySelector('input').oninput = function () {
-        PRJ.colors[i] = this.value; saveProject();
-        S.bins3d = null; S.desPrevKey = null; S.bpPreview = null; S.make = null;
-        bpInputs(); renderBins(); bpPreview(); draw();
-      };
-      box.appendChild(l);
-    });
-  }
-  renderFilaments();
 
   // ---------- 4. Make: everything to print or cut ----------
 
@@ -2182,19 +2135,12 @@
 
   function stdKey(b) {
     var o = b.opt;
-    return [b.kx, b.ky, b.units, o.cx, o.cy, +!!o.label, +!!o.scoop, +!!o.lip, +!!o.magnets, o.wall, o.divH, o.color, o.accent].join('-');
+    return [b.kx, b.ky, b.units, o.cx, o.cy, +!!o.label, +!!o.scoop, +!!o.lip, +!!o.magnets, o.wall, o.divH].join('-');
   }
   function stdName(b) {
     var o = b.opt;
     return 'Bin ' + b.kx + '×' + b.ky + '×' + b.units + 'u' + (o.cx * o.cy > 1 ? ', ' + o.cx + '×' + o.cy + ' compartments' : '') +
       (o.label ? ', label' : '') + (o.scoop ? ', scoop' : '') + (o.lip ? ', lip' : '') + (o.magnets ? ', magnets' : '');
-  }
-  // A standard design's print: one filament, or the bin plus its dividers and labels on another.
-  function stdParts(d) {
-    var m = designMesh(d), col = d.opt.color || 1, acc = d.opt.accent || 0, all = m.body.concat(m.accent);
-    if (acc && acc !== col && m.accent.length)
-      return { shells: all, extruder: col, parts: [{ name: 'Bin', shells: m.body, extruder: col }, { name: 'Dividers and labels', shells: m.accent, extruder: acc }] };
-    return { shells: all, extruder: col };
   }
   function fileSafe(s) { return s.replace(/×/g, 'x').replace(/[^\w.-]+/g, '_').replace(/_+$/, ''); }
 
@@ -2206,9 +2152,9 @@
     function add(r) { rows.push(r); return r; }
     if (DR.plate === 'print') {
       var tp = bpTestPiece(p);
-      add({ key: 'test-plate', group: 'test', label: 'Baseplate test piece, ' + tp.kx + ' × ' + tp.ky + ' cells', count: 1, shells: TT.bpMesh(tp, BPS.style).shells, extruder: BPS.color || 1, file: 'test_baseplate_' + tp.kx + 'x' + tp.ky + '.stl', noPack: true });
+      add({ key: 'test-plate', group: 'test', label: 'Baseplate test piece, ' + tp.kx + ' × ' + tp.ky + ' cells', count: 1, shells: TT.bpMesh(tp, BPS.style).shells, file: 'test_baseplate_' + tp.kx + 'x' + tp.ky + '.stl', noPack: true });
       p.types.forEach(function (t) {
-        add({ key: 'plate-' + t.key, group: 'plate', label: 'Baseplate ' + t.label + ': ' + t.kx + ' × ' + t.ky + ' cells' + (t.pad.some(Boolean) ? ', padded' : ''), count: t.count, shells: t.mesh.shells, extruder: BPS.color || 1, file: 'baseplate_' + t.label + '_' + t.kx + 'x' + t.ky + '.stl' });
+        add({ key: 'plate-' + t.key, group: 'plate', label: 'Baseplate ' + t.label + ': ' + t.kx + ' × ' + t.ky + ' cells' + (t.pad.some(Boolean) ? ', padded' : ''), count: t.count, shells: t.mesh.shells, file: 'baseplate_' + t.label + '_' + t.kx + 'x' + t.ky + '.stl' });
       });
     } else if (DR.plate === 'laser' && S.bpLaser) {
       add({ key: 'test-laser', group: 'test', label: 'Laser hole-size test strip', count: 1, file: 'test_hole_strip.dxf',
@@ -2227,15 +2173,15 @@
       if (!n) { unplaced.push(designName(d)); return; }
       if (d.kind === 'std') {
         var k = stdKey(d);
-        if (!groups[k]) groups[k] = add(Object.assign({ key: 'std-' + k, group: 'bins', label: d.name ? d.name + ' (' + stdName(d).replace(/^Bin /, '') + ')' : stdName(d), count: 0,
-          file: fileSafe(d.name || stdName(d)) + '.stl' }, stdParts(d)));
+        if (!groups[k]) groups[k] = add({ key: 'std-' + k, group: 'bins', label: d.name ? d.name + ' (' + stdName(d).replace(/^Bin /, '') + ')' : stdName(d), count: 0,
+          file: fileSafe(d.name || stdName(d)) + '.stl', shells: designMesh(d) });
         groups[k].count += n;
         return;
       }
       if (!(d.layout && d.layout.items && d.layout.items.length)) { problems.push(designName(d) + ' has no tools yet, so it is left out.'); return; }
       toolBinPieces(d).forEach(function (q, i, all) {
         add({ key: 'tool-' + d.id + '-' + i, group: 'bins', label: designName(d) + (all.length > 1 ? ', piece ' + (i + 1) : '') + ', ' + q.pc.kx + '×' + q.pc.ky + '×' + q.units + 'u',
-          count: n, shells: q.mesh.shells, extruder: d.opt.color || 1, file: fileSafe(designName(d)) + (all.length > 1 ? '_part' + (i + 1) : '') + '.stl' });
+          count: n, shells: q.mesh.shells, file: fileSafe(designName(d)) + (all.length > 1 ? '_part' + (i + 1) : '') + '.stl' });
       });
     });
     rows.forEach(function (r) {
@@ -2253,7 +2199,7 @@
     var items = [];
     rows.forEach(function (r) {
       if (!r.shells || r.noPack) return;
-      for (var c = 0; c < r.count; c++) items.push({ name: r.label + (r.count > 1 ? ' #' + (c + 1) : ''), short: r.label.replace(/[,:].*/, ''), shells: r.shells, parts: r.parts, extruder: r.extruder, w: r.w, h: r.h });
+      for (var c = 0; c < r.count; c++) items.push({ name: r.label + (r.count > 1 ? ' #' + (c + 1) : ''), short: r.label.replace(/[,:].*/, ''), shells: r.shells, w: r.w, h: r.h });
     });
     var pack = TT.packPlates(items, BPS.maxPrint);
     pack.tooBig.forEach(function (it) { problems.push(it.name + ' is bigger than the ' + BPS.maxPrint + ' mm bed.'); });
@@ -2282,7 +2228,7 @@
           cb.onchange = function () { if (this.checked) PRJ.done[r.key] = 1; else delete PRJ.done[r.key]; saveProject(); row.classList.toggle('off', this.checked); };
           var bt = document.createElement('button');
           bt.className = 'b'; bt.style.marginLeft = 'auto'; bt.textContent = r.dxf ? 'DXF' : '3MF';
-          bt.onclick = function () { if (r.dxf) download(r.file, r.dxf(), 'application/dxf'); else save3mf(r.file.replace(/\.stl$/, ''), [{ name: r.label, shells: r.shells, parts: r.parts, extruder: r.extruder }]); };
+          bt.onclick = function () { if (r.dxf) download(r.file, r.dxf(), 'application/dxf'); else save3mf(r.file.replace(/\.stl$/, ''), [{ name: r.label, shells: r.shells }]); };
           row.appendChild(bt);
           list.appendChild(row);
         });
@@ -2402,7 +2348,7 @@
     }
     p.pieces.forEach(function (pc) {
       ctx.beginPath(); roundRectPath(pc.x, Y(pc.y + pc.h), pc.w, pc.h, R);
-      ctx.fillStyle = BP_COLOURS[p.types.indexOf(pc.type) % BP_COLOURS.length]; ctx.fill();
+      ctx.fillStyle = BP_COLORS[p.types.indexOf(pc.type) % BP_COLORS.length]; ctx.fill();
       ctx.beginPath();
       for (var j = 0; j < pc.ky; j++) for (var i = 0; i < pc.kx; i++) roundRectPath(p.grid[0] + (pc.ix + i) * P, Y(p.grid[1] + (pc.iy + j + 1) * P), P, P, R);
       ctx.strokeStyle = 'rgba(0,0,0,0.2)'; ctx.lineWidth = 1 / v.s; ctx.stroke();
@@ -2545,7 +2491,7 @@
     ctx.drawImage(S.warpCanvas, 0, 0);
     if (S.overlay) ctx.drawImage(S.overlay, 0, 0);
     ctx.restore();
-    // Outlines: included = yellow with small node dots, left out = grey dashed, selected = blue
+    // Outlines: included = yellow with small node dots, left out = gray dashed, selected = blue
     // with editable nodes (square = corner, round = smooth).
     S.shapes.forEach(function (sh) {
       ctx.beginPath();
@@ -2636,7 +2582,7 @@
     ctx.font = '12px system-ui'; ctx.fillText(len === 50 * v.s ? '50 mm' : '100 mm', x, y - 7);
   }
 
-  function depthColour(d, a) {
+  function depthColor(d, a) {
     var max = Math.max(1, TT.maxDepth(L)), t = Math.min(1, d / max);
     return 'hsla(' + (35 - 25 * t) + ',85%,' + (62 - 22 * t) + '%,' + a + ')';
   }
@@ -2670,14 +2616,14 @@
     L.items.slice().sort(function (a, b) { return a.depth - b.depth; }).forEach(function (it) {
       itemPath(it);
       ctx.lineJoin = 'round';
-      if (L.clearance > 0) { ctx.strokeStyle = depthColour(it.depth, 0.45); ctx.lineWidth = 2 * L.clearance; ctx.stroke(); }
-      ctx.fillStyle = depthColour(it.depth, 0.8); ctx.fill('evenodd');
+      if (L.clearance > 0) { ctx.strokeStyle = depthColor(it.depth, 0.45); ctx.lineWidth = 2 * L.clearance; ctx.stroke(); }
+      ctx.fillStyle = depthColor(it.depth, 0.8); ctx.fill('evenodd');
       ctx.strokeStyle = it.uid === S.sel ? '#1c7ed6' : 'rgba(0,0,0,0.55)'; ctx.lineWidth = (it.uid === S.sel ? 2.5 : 1) / v.s; ctx.stroke();
     });
     L.notches.forEach(function (n) {
       if (n.item && !itemById(n.item)) return;
       var on = n.id === S.selNotch;
-      drawNotch(notchWorld(n), depthColour(notchDepth(n), 0.6), on ? '#1c7ed6' : 'rgba(0,0,0,0.5)', v, on);
+      drawNotch(notchWorld(n), depthColor(notchDepth(n), 0.6), on ? '#1c7ed6' : 'rgba(0,0,0,0.5)', v, on);
     });
     // Symmetry axes of tools that have one (pink, dashed).
     L.items.forEach(function (it2) {
