@@ -266,8 +266,71 @@ var TT = window.TT = window.TT || {};
     return missing;
   }
 
+  // Closed solid between stacked rings (same point count, solid on the left, y up) with
+  // vertical holes (clockwise loops) right through it: a loft with through-holes.
+  function holedLoft(m, rings, holes) {
+    var lo = rings[0], hi = rings[rings.length - 1], i, k;
+    for (k = 0; k + 1 < rings.length; k++) {
+      var A = rings[k], B = rings[k + 1], n = A.pts.length;
+      for (i = 0; i < n; i++) {
+        var j = (i + 1) % n;
+        m.quad([A.pts[i][0], A.pts[i][1], A.z], [A.pts[j][0], A.pts[j][1], A.z], [B.pts[j][0], B.pts[j][1], B.z], [B.pts[i][0], B.pts[i][1], B.z]);
+      }
+    }
+    holes.forEach(function (l) {
+      for (var i = 0; i < l.length; i++) {
+        var p = l[i], q = l[(i + 1) % l.length];
+        m.quad([p[0], p[1], lo.z], [q[0], q[1], lo.z], [q[0], q[1], hi.z], [p[0], p[1], hi.z]);
+      }
+    });
+    [lo, hi].forEach(function (r, top) {
+      var flat = [], idx = [], pts = [];
+      [r.pts].concat(holes).forEach(function (l, li) {
+        if (li) idx.push(pts.length);
+        l.forEach(function (p) { flat.push(p[0], p[1]); pts.push(p); });
+      });
+      var t = TT.earcut(flat, idx);
+      for (var i = 0; i < t.length; i += 3) {
+        var a = pts[t[i]], b = pts[t[i + 1]], c = pts[t[i + 2]];
+        if ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]) < 0) { var tmp = b; b = c; c = tmp; }
+        if (top) m.tri([a[0], a[1], r.z], [b[0], b[1], r.z], [c[0], c[1], r.z]);
+        else m.tri([a[0], a[1], r.z], [c[0], c[1], r.z], [b[0], b[1], r.z]);
+      }
+    });
+  }
+
+  // Clockwise circle (a hole loop for prism / holedLoft).
+  function circle(cx, cy, r, n) {
+    var pts = [];
+    for (var i = 0; i < n; i++) { var a = -2 * Math.PI * i / n; pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]); }
+    return pts;
+  }
+
+  // Magnet holes (Gridfinity spec: 6.5 mm across, 2.4 deep, 13 mm from the cell centre).
+  G.magnet = { d: 6.5, depth: 2.4, at: 13 };
+
+  // One foot centred at (cx, cy); with magnets, 4 blind holes in its underside. Returns shells.
+  TT.footShells = function (cx, cy, magnets) {
+    var rings = G.foot.map(function (f) { return { z: f[0], pts: roundRect(cx, cy, 41.5 - 2 * f[1], 41.5 - 2 * f[1], G.radius - f[1], 8) }; });
+    var m = new Mesh();
+    if (!magnets) { loft(m, rings); return [new Float32Array(m.v)]; }
+    // Below the hole depth: a holed loft (the bottom chamfer plus the straight part up to the
+    // hole top); above: the rest of the foot, solid. Together the holes are blind.
+    var M = G.magnet, zt = M.depth, lower = [], upper = [], k = M.at, hole = [[-k, -k], [k, -k], [k, k], [-k, k]].map(function (o) { return circle(cx + o[0], cy + o[1], M.d / 2, 20); });
+    function at(z) { // ring at height z (between foot rings 1 and 2, the straight part)
+      var f = G.foot[1][1];
+      return { z: z, pts: roundRect(cx, cy, 41.5 - 2 * f, 41.5 - 2 * f, G.radius - f, 8) };
+    }
+    rings.forEach(function (r) { if (r.z < zt - 1e-6) lower.push(r); else if (r.z > zt + 1e-6) upper.push(r); });
+    lower.push(at(zt)); upper.unshift(at(zt));
+    holedLoft(m, lower, hole);
+    var m2 = new Mesh();
+    loft(m2, upper);
+    return [new Float32Array(m.v), new Float32Array(m2.v)];
+  };
+
   // Shared with bins.js (standard bins).
-  TT.Mesh = Mesh; TT.loft = loft; TT.roundRect = roundRect; TT.prism = prism;
+  TT.Mesh = Mesh; TT.loft = loft; TT.roundRect = roundRect; TT.prism = prism; TT.circle = circle;
 
   // One printable bin. fields = TT.pocketFields(...). Returns {shells: [Float32Array], missingArea}.
   // Solid = feet + base slab up to the deepest pocket floor + one layer per pocket depth, each the
@@ -276,13 +339,9 @@ var TT = window.TT = window.TT || {};
     var W = TT.binSize(pc.kx), H = TT.binSize(pc.ky), X0 = pc.ix * G.pitch, Y0 = pc.iy * G.pitch;
     var top = L.units * G.unitH, shells = [], missing = 0;
 
-    for (var gy = 0; gy < pc.ky; gy++) for (var gx = 0; gx < pc.kx; gx++) {
-      var m = new Mesh(), cx = gx * G.pitch + 20.75, cy = H - (gy * G.pitch + 20.75);
-      loft(m, G.foot.map(function (f) {
-        return { z: f[0], pts: roundRect(cx, cy, 41.5 - 2 * f[1], 41.5 - 2 * f[1], G.radius - f[1], 8) };
-      }));
-      shells.push(m);
-    }
+    var feet = [];
+    for (var gy = 0; gy < pc.ky; gy++) for (var gx = 0; gx < pc.kx; gx++)
+      feet = feet.concat(TT.footShells(gx * G.pitch + 20.75, H - (gy * G.pitch + 20.75), L.magnets));
 
     var floors = fields.map(function (f) { return top - f.depth; }), firstFloor = floors.length ? floors[0] : top;
     var body = new Mesh(), outline = roundRect(W / 2, H / 2, W, H, G.radius, 8);
@@ -322,7 +381,7 @@ var TT = window.TT = window.TT || {};
       missing += prism(layer, loops, z0 - 0.2, z1);
       shells.push(layer);
     });
-    shells = shells.map(function (s) { return new Float32Array(s.v); });
+    shells = feet.concat(shells.map(function (s) { return new Float32Array(s.v); }));
     // Optional stacking lip on top of the outer edge (its support stays above the base).
     if (L.lip) shells.push(TT.sweep(W / 2, H / 2, W / 2, H / 2, G.radius, TT.lipProfile(top, G.baseH)));
     return { shells: shells, missingArea: missing };

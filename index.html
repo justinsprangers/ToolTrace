@@ -23,6 +23,18 @@
   .phases.sub span { color: var(--mute); font-size: 12.5px; margin-right: 2px; }
   .phases.sub button { padding: 3px 10px; font-size: 13px; }
   .phases[hidden], button[hidden], .btns[hidden] { display: none; }
+  .menuwrap { position: relative; display: inline-block; }
+  .menu { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.16); padding: 4px; width: 290px; }
+  .menu[hidden] { display: none; }
+  .menu button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 0; background: none; padding: 5px 8px; border-radius: 5px; cursor: pointer; font: inherit; }
+  .menu button:hover { background: #f1f3f5; }
+  .menu button span { display: flex; flex-direction: column; line-height: 1.25; }
+  .menu small { color: var(--mute); font-size: 12px; }
+  .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; }
+  .minview { display: block; width: 100%; height: 190px; border-radius: 6px; background: #e7e7e3; margin: 2px 0 8px; cursor: grab; touch-action: none; }
+  .swatches { display: flex; gap: 10px; flex-wrap: wrap; }
+  .swatches label { display: flex; align-items: center; gap: 5px; font-size: 13px; }
+  .swatches input[type=color] { width: 34px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; cursor: pointer; }
   .phases button.parent { background: #e9ecef; border-color: #adb5bd; }
   header .spacer { flex: 1; }
   main { display: grid; grid-template-columns: 370px 1fr; flex: 1; min-height: 0; }
@@ -198,10 +210,11 @@
         <li>Make a design, then <b>Place</b> it (or drag it onto the drawer), as many times as you like.</li>
         <li>Changing a design changes every placed copy.</li>
       </ul>
-      <div class="btns"><button class="b" id="desNewStd" title="A plain bin with optional compartments, label tab and scoop">+ Standard bin</button><button class="b" id="desNewTool" title="A bin with pockets shaped like your tools (photo → trace → layout)">+ Tool bin</button></div>
+      <div class="btns"><span class="menuwrap"><button class="b" id="desNewStd" title="Pick a ready-made container to start from">+ Standard bin ▾</button><div class="menu" id="presetMenu" hidden></div></span><button class="b" id="desNewTool" title="A bin with pockets shaped like your tools (photo → trace → layout)">+ Tool bin</button></div>
       <div class="shapelist" id="desList"></div>
     </details>
     <details class="sec" open id="desSec" hidden><summary id="desTitle">Design</summary>
+      <canvas id="desView" class="minview" title="Drag to turn, scroll to zoom"></canvas>
       <div class="field"><label>Name</label><input type="text" id="desName"></div>
       <div class="field"><label>Size (cells)</label><input type="number" id="desKx" min="1"><input type="number" id="desKy" min="1"></div>
       <div class="field"><label>Height (7 mm units)</label><input type="number" id="desU" min="1"></div>
@@ -211,6 +224,13 @@
         <label class="check"><input type="checkbox" id="desScoop"> Finger scoop (front)</label>
       </div>
       <label class="check"><input type="checkbox" id="desLip"> Stacking lip</label>
+      <label class="check"><input type="checkbox" id="desMag"> Magnet holes (6 × 2 mm magnets)</label>
+      <div id="desStdMore">
+        <div class="field"><label>Walls</label><select id="desWall"><option value="0.8">Thin, 0.8 mm</option><option value="1.2">Standard, 1.2 mm</option><option value="1.6">Sturdy, 1.6 mm</option><option value="2">Thick, 2 mm</option></select></div>
+        <div class="field"><label>Dividers</label><select id="desDivH"><option value="full">Full height</option><option value="half">Half height (easy reach)</option></select></div>
+      </div>
+      <div class="field"><label>Colour</label><select id="desColor"></select></div>
+      <div class="field" id="desAccentRow"><label>Dividers and labels</label><select id="desAccent"></select></div>
       <div class="btns"><button class="b primary" id="desPlace" title="Put a copy in the drawer">Place in drawer</button><button class="b" id="desEditTool">Edit tools →</button><button class="b" id="desDup">Duplicate</button><button class="b" id="desDel">Delete</button></div>
       <div class="hint" id="desInfo"></div>
     </details>
@@ -227,12 +247,16 @@
       <div id="binNewCtls"></div>
       <div id="binInfo" class="info"></div>
     </details>
+    <details class="sec" data-key="filaments"><summary>Filament colours</summary>
+      <div class="swatches" id="filaments"></div>
+      <ul class="tips"><li>Each bin design and the baseplate print in one of 4 filament slots (Colour); a standard bin can put its dividers and labels on another.</li><li>The 3MF assigns each part to its slot. The colours here are only for the previews; load the real filaments in Bambu Studio.</li></ul>
+    </details>
   </div>
 
   <!-- 4. Make: everything to print or cut, exports, checklist -->
   <div class="panel" id="panel-make" hidden>
     <details class="sec" open data-key="make"><summary>Everything to make</summary>
-      <div class="btns"><button class="b primary" id="mk3mf" title="Every print (baseplate and bins) packed onto build plates in one Bambu Studio file">Bambu 3MF (all plates)</button><button class="b" id="mkZip">All STLs (.zip)</button><button class="b" id="mkDxf">Laser DXF</button></div>
+      <div class="btns"><button class="b primary" id="mk3mf" title="Every print (baseplate and bins) packed onto build plates in one Bambu Studio file">Bambu 3MF (all plates)</button><button class="b" id="mkZip" title="Every print as a separate STL, for slicers without 3MF support">STL zip (other slicers)</button><button class="b" id="mkDxf">Laser DXF</button></div>
       <div id="mkInfo" class="info"></div>
       <ul class="tips">
         <li>Make the <b>test</b> items first and check the fit.</li>
@@ -378,7 +402,14 @@
     <details class="sec" open data-key="lib"><summary>Library</summary>
       <div class="btns libbar"><label class="check"><input type="checkbox" id="libAll"> All</label><button class="b" id="libDel" disabled>Delete ticked</button></div>
       <div class="lib" id="lib"></div>
-      <p class="hint" id="libEmpty">No shapes yet. Trace some in Capture.</p>
+      <p class="hint" id="libEmpty">No shapes yet. Trace some in Capture, or add a simple shape below.</p>
+    </details>
+    <details class="sec" open data-key="shapes"><summary>Simple shapes</summary>
+      <div class="field"><label>Shape</label><select id="shKind"><option value="rect">Rectangle</option><option value="round">Rounded rectangle</option><option value="circle">Circle</option><option value="slot">Slot (round ends)</option><option value="hex">Hexagon (bits, nuts)</option></select></div>
+      <div class="field"><label id="shSizeLabel">Width × length</label><input type="number" id="shW" value="30" min="1" step="any"><input type="number" id="shH" value="20" min="1" step="any"></div>
+      <div class="field"><label>Depth × copies</label><input type="number" id="shD" value="15" min="0.5" step="any"><input type="number" id="shN" value="1" min="1" max="60"></div>
+      <div class="btns"><button class="b primary" id="shAdd">Add to bin</button></div>
+      <ul class="tips"><li>Pockets for loose parts, bits, batteries or anything you didn't trace. They behave like traced tools: move, rotate, depth, notches.</li><li>Sizes are the pocket itself (mm); clearance is added around it.</li></ul>
     </details>
     <details class="sec" open data-key="bin"><summary>Bin</summary>
       <label class="check"><input type="checkbox" id="autoSize" checked> Fit bin to the tools automatically</label>
@@ -428,6 +459,8 @@
     <details class="sec" open data-key="model"><summary>Model</summary>
       <label class="check"><input type="checkbox" id="autoUnits" checked> Height from the deepest pocket</label>
       <div class="field"><label>Height units (7 mm)</label><input type="number" id="units" value="3" min="1"></div>
+      <label class="check"><input type="checkbox" id="genLip"> Stacking lip</label>
+      <label class="check"><input type="checkbox" id="genMag"> Magnet holes (6 × 2 mm magnets)</label>
       <div id="genCtls"></div>
       <div class="btns"><button class="b primary" id="generate">Generate model</button><button class="b" data-reset="genCtls">Restore defaults</button></div>
       <div id="genInfo" class="info"></div>
@@ -458,6 +491,13 @@
       <ul class="tips"><li>Only whole 42 mm cells; padding (or the gap) takes the rest.</li><li><b>One corner</b> keeps the other edges plain, so more pieces are standard. Front = bottom of the plan.</li></ul>
     </details>
     <details class="sec" open data-key="bpPrint"><summary>Printing</summary>
+      <div class="seg" id="bpStyle" title="Baseplate profile">
+        <button data-mode="ultralight">Ultralight</button>
+        <button data-mode="standard">Standard</button>
+        <button data-mode="magnet">Magnet</button>
+      </div>
+      <div class="hint" id="bpStyleNote"></div>
+      <div class="field"><label>Colour</label><select id="bpColor"></select></div>
       <div id="bpPrintCtls"></div>
       <div class="btns"><button class="b" data-reset="bpPrintCtls">Restore defaults</button></div>
       <ul class="tips"><li>Max print size: A1 mini 180 mm; A1, P1S, X1C 256 mm.</li><li>Every piece is at least <b>Min connected rows</b> cells in both directions when it fits.</li></ul>
@@ -547,16 +587,16 @@
   <table><tr><td><kbd>G</kbd></td><td>Generate model</td></tr></table>
 </dialog>
 <!-- ?v= makes browsers (and GitHub Pages' cache) fetch new scripts with a new page; bump it on every change. -->
-<script src="js/earcut.js?v=7"></script>
-<script src="js/vision.js?v=7"></script>
-<script src="js/grid.js?v=7"></script>
-<script src="js/gridfinity.js?v=7"></script>
-<script src="js/baseplate.js?v=7"></script>
-<script src="js/zip.js?v=7"></script>
-<script src="js/make.js?v=7"></script>
-<script src="js/preview3d.js?v=7"></script>
-<script src="js/bins.js?v=7"></script>
-<script src="js/app.js?v=7"></script>
-<script src="js/tour.js?v=7"></script>
+<script src="js/earcut.js?v=8"></script>
+<script src="js/vision.js?v=8"></script>
+<script src="js/grid.js?v=8"></script>
+<script src="js/gridfinity.js?v=8"></script>
+<script src="js/baseplate.js?v=8"></script>
+<script src="js/zip.js?v=8"></script>
+<script src="js/make.js?v=8"></script>
+<script src="js/preview3d.js?v=8"></script>
+<script src="js/bins.js?v=8"></script>
+<script src="js/app.js?v=8"></script>
+<script src="js/tour.js?v=8"></script>
 </body>
 </html>

@@ -4,21 +4,28 @@ var TT = window.TT = window.TT || {};
 (function () {
   'use strict';
 
-  // meshes: [{shells: [Float32Array], ox, oy}] placed side by side.
+  // meshes: [{shells: [Float32Array], ox, oy, oz (optional), color (optional '#rrggbb')}].
   TT.Preview3D = function (meshes) {
     var n = 0;
     meshes.forEach(function (m) { m.shells.forEach(function (s) { n += s.length; }); });
-    var v = new Float32Array(n), o = 0, b = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+    var v = new Float32Array(n), col = new Uint8Array(n / 3), o = 0, b = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+    var cols = [[215, 231, 245]], seen = {}; // [r, g, b]; 0 = the default blue-grey
     meshes.forEach(function (m) {
+      var ci = 0;
+      if (m.color) {
+        if (seen[m.color] === undefined) { var h = parseInt(m.color.slice(1), 16); cols.push([h >> 16 & 255, h >> 8 & 255, h & 255]); seen[m.color] = cols.length - 1; }
+        ci = seen[m.color];
+      }
       m.shells.forEach(function (s) {
         for (var i = 0; i < s.length; i += 3) {
-          v[o] = s[i] + m.ox; v[o + 1] = s[i + 1] + m.oy; v[o + 2] = s[i + 2];
+          v[o] = s[i] + (m.ox || 0); v[o + 1] = s[i + 1] + (m.oy || 0); v[o + 2] = s[i + 2] + (m.oz || 0);
           for (var a = 0; a < 3; a++) { b[a] = Math.min(b[a], v[o + a]); b[a + 3] = Math.max(b[a + 3], v[o + a]); }
+          if (i % 9 === 0) col[o / 9] = ci;
           o += 3;
         }
       });
     });
-    this.v = v;
+    this.v = v; this.col = col; this.cols = cols;
     this.c = [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2];
     this.r = Math.hypot(b[3] - b[0], b[4] - b[1], b[5] - b[2]) / 2 || 1;
     this.hz = (b[5] - b[2]) / 2 || 1;
@@ -50,7 +57,8 @@ var TT = window.TT = window.TT || {};
       // Light from above-front, darkened with depth so pocket floors stand out from the top.
       var zMid = (v[a + 2] + v[a + 5] + v[a + 8]) / 3 - c[2];
       var s = (0.25 + 0.75 * Math.max(0, (nx * Lx + ny * Ly + nz * Lz) / (nl * ll))) * (0.6 + 0.4 * Math.min(1, Math.max(0, 0.5 + zMid / (2 * this.hz))));
-      var col = 0xff000000 | (Math.round(70 + 175 * s) << 16) | (Math.round(66 + 165 * s) << 8) | Math.round(60 + 155 * s);
+      var cc = this.cols[this.col[t]], k0 = 0.28 + 0.72 * s;
+      var col = 0xff000000 | (Math.round(cc[2] * k0) << 16) | (Math.round(cc[1] * k0) << 8) | Math.round(cc[0] * k0);
       var minX = Math.max(0, Math.floor(Math.min(x0, xa, xb))), maxX = Math.min(W - 1, Math.ceil(Math.max(x0, xa, xb)));
       var minY = Math.max(0, Math.floor(Math.min(y0, ya, yb))), maxY = Math.min(H - 1, Math.ceil(Math.max(y0, ya, yb)));
       if (minX > maxX || minY > maxY) continue;

@@ -42,13 +42,20 @@ var TT = window.TT = window.TT || {};
   function xmlEsc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); }
   function num(v) { return +v.toFixed(4); }
 
-  // Indexed mesh text (shared vertices) for closed shells, centred in x, y with z from 0.
-  function meshXml(shells) {
+  // Centre in x, y and bottom in z of a set of shells: [cx, cy, z0].
+  function centreOf(shells) {
     var b = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
     shells.forEach(function (s) {
       for (var i = 0; i < s.length; i += 3) for (var a = 0; a < 3; a++) { b[a] = Math.min(b[a], s[i + a]); b[a + 3] = Math.max(b[a + 3], s[i + a]); }
     });
-    var cx = (b[0] + b[3]) / 2, cy = (b[1] + b[4]) / 2, cz = b[2], idx = new Map(), verts = [], tris = [];
+    return [(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, b[2]];
+  }
+
+  // Indexed mesh text (shared vertices) for closed shells, moved so c (default: their own
+  // centre and bottom) is the origin.
+  function meshXml(shells, c) {
+    c = c || centreOf(shells);
+    var cx = c[0], cy = c[1], cz = c[2], idx = new Map(), verts = [], tris = [];
     shells.forEach(function (s) {
       for (var t = 0; t < s.length; t += 9) {
         var ids = [];
@@ -64,26 +71,36 @@ var TT = window.TT = window.TT || {};
     return { xml: '<mesh><vertices>' + verts.join('') + '</vertices><triangles>' + tris.join('') + '</triangles></mesh>', n: tris.length };
   }
 
-  // plates: [[{item: {name, shells}, x, y, rot}]] from TT.packPlates; bed: bed size (mm).
-  // Returns [{name, data}] for TT.zip. Plates sit on Bambu's plate grid: ceil(√n) columns,
-  // 1.2 × bed apart, rows going down (−y).
+  // plates: [[{item: {name, shells, extruder?, parts?}, x, y, rot}]] from TT.packPlates; bed: bed
+  // size (mm). item.parts = [{name, shells, extruder}] makes a multicolour object: one part per
+  // filament, all in one object (Bambu paints each part with its filament). Without parts, the
+  // object is item.shells on item.extruder (default 1). Returns [{name, data}] for TT.zip.
+  // Plates sit on Bambu's plate grid: ceil(√n) columns, 1.2 × bed apart, rows going down (−y).
   TT.bambu3mf = function (plates, bed, title) {
     var files = [], objs = [], items = [], rels = [], cfg = [], plateCfg = [], id = 1;
     var cols = Math.ceil(Math.sqrt(plates.length)), step = bed * 1.2;
     plates.forEach(function (pl, pi) {
       var ox = (pi % cols) * step, oy = -Math.floor(pi / cols) * step, inst = [];
       pl.forEach(function (p) {
-        var meshId = id++, objId = id++, path = '/3D/Objects/object_' + meshId + '.model', m = meshXml(p.item.shells);
-        files.push({ name: path.slice(1), data: '<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:BambuStudio="http://schemas.bambulab.com/package/2021" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06" requiredextensions="p">\n' +
-          ' <metadata name="BambuStudio:3mfVersion">1</metadata>\n <resources>\n  <object id="' + meshId + '" p:UUID="' + uuid(meshId) + '" type="model">' + m.xml + '</object>\n </resources>\n <build/>\n</model>\n' });
-        rels.push(' <Relationship Target="' + path + '" Id="rel-' + meshId + '" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>');
-        objs.push('  <object id="' + objId + '" p:UUID="' + uuid(objId) + '" type="model"><components><component p:path="' + path + '" objectid="' + meshId +
-          '" p:UUID="' + uuid(objId + 0x10000) + '" transform="1 0 0 0 1 0 0 0 1 0 0 0"/></components></object>');
+        var parts = p.item.parts || [{ name: p.item.name, shells: p.item.shells, extruder: p.item.extruder || 1 }];
+        // Every part shares the whole object's centre so the parts stay in register.
+        var c = centreOf([].concat.apply([], parts.map(function (q) { return q.shells; })));
+        var objId = id++, comps = [], partCfg = [];
+        parts.forEach(function (q, k) {
+          var meshId = id++, path = '/3D/Objects/object_' + meshId + '.model', m = meshXml(q.shells, c);
+          files.push({ name: path.slice(1), data: '<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:BambuStudio="http://schemas.bambulab.com/package/2021" xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06" requiredextensions="p">\n' +
+            ' <metadata name="BambuStudio:3mfVersion">1</metadata>\n <resources>\n  <object id="' + meshId + '" p:UUID="' + uuid(meshId) + '" type="model">' + m.xml + '</object>\n </resources>\n <build/>\n</model>\n' });
+          rels.push(' <Relationship Target="' + path + '" Id="rel-' + meshId + '" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>');
+          comps.push('<component p:path="' + path + '" objectid="' + meshId + '" p:UUID="' + uuid(meshId + 0x10000) + '" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>');
+          partCfg.push('    <part id="' + meshId + '" subtype="normal_part">\n      <metadata key="name" value="' + xmlEsc(q.name || p.item.name) + '"/>\n' +
+            '      <metadata key="matrix" value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"/>\n      <metadata key="extruder" value="' + (q.extruder || 1) + '"/>\n    </part>');
+        });
+        objs.push('  <object id="' + objId + '" p:UUID="' + uuid(objId) + '" type="model"><components>' + comps.join('') + '</components></object>');
         var tf = (p.rot ? '0 1 0 -1 0 0 0 0 1 ' : '1 0 0 0 1 0 0 0 1 ') + num(ox + p.x) + ' ' + num(oy + p.y) + ' 0';
         items.push('  <item objectid="' + objId + '" p:UUID="' + uuid(objId + 0x20000) + '" transform="' + tf + '" printable="1"/>');
         var nm = xmlEsc(p.item.name);
-        cfg.push('  <object id="' + objId + '">\n    <metadata key="name" value="' + nm + '"/>\n    <metadata key="extruder" value="1"/>\n' +
-          '    <part id="' + meshId + '" subtype="normal_part">\n      <metadata key="name" value="' + nm + '"/>\n      <metadata key="matrix" value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"/>\n    </part>\n  </object>');
+        cfg.push('  <object id="' + objId + '">\n    <metadata key="name" value="' + nm + '"/>\n    <metadata key="extruder" value="' + (parts[0].extruder || 1) + '"/>\n' +
+          partCfg.join('\n') + '\n  </object>');
         inst.push('    <model_instance>\n      <metadata key="object_id" value="' + objId + '"/>\n      <metadata key="instance_id" value="0"/>\n    </model_instance>');
       });
       plateCfg.push('  <plate>\n    <metadata key="plater_id" value="' + (pi + 1) + '"/>\n    <metadata key="plater_name" value=""/>\n    <metadata key="locked" value="false"/>\n' + inst.join('\n') + '\n  </plate>');

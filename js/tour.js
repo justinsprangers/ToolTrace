@@ -75,9 +75,9 @@ var TT = window.TT = window.TT || {};
     { target: '#drPlate', title: 'Baseplate type', html:
       '<ul><li><b>3D printed</b>: ultralight pieces sized for your bed.</li><li><b>Laser-cut</b>: one sheet with a hole per cell.</li><li><b>None</b>: bins sit loose.</li></ul>', phase: 'drawer' },
     { target: 'details[data-key=bpArea]', title: '2. Baseplate', html:
-      '<ul><li><b>Pad edges</b> fills the drawer exactly; <b>one corner</b> keeps more pieces standard.</li><li><b>Max print size</b> is your bed size.</li><li>Print the <b>test piece</b> first.</li></ul>', phase: 'baseplate' },
+      '<ul><li>Style: <b>Ultralight</b> (least plastic), <b>Standard</b> (full profile) or <b>Magnet</b> (pockets for 6 × 2 mm magnets).</li><li><b>Pad edges</b> fills the drawer exactly; <b>one corner</b> keeps more pieces standard.</li><li><b>Max print size</b> is your bed size. Print the <b>test piece</b> first.</li></ul>', phase: 'baseplate' },
     { target: 'details[data-key=binDesigns]', title: '3. Bin designs', html:
-      '<ul><li><b>+ Standard bin</b> or <b>+ Tool bin</b> makes a design; it isn’t in the drawer yet.</li><li>Click a design for its size, compartments, label tab, scoop and lip.</li><li><b>Place</b> (or drag it onto the drawer) puts in a copy; place as many as you like.</li></ul>', phase: 'bins' },
+      '<ul><li><b>+ Standard bin</b> offers ready-made containers (cups, sorters, label trays, pocket bins); <b>+ Tool bin</b> traces your tools.</li><li>Click a design to change it, with a live 3D preview: compartments, labels, scoops, lip, magnets, walls and colours.</li><li><b>Place</b> (or drag it onto the drawer) puts in a copy; place as many as you like. <b>3D</b> above the drawer shows it all in place.</li></ul>', phase: 'bins' },
     { target: 'details[data-key=bins]', title: 'Bins in the drawer', html:
       '<ul><li>Click a bin, then <kbd>R</kbd> rotates it; drag to move, <kbd>Delete</kbd> takes it out.</li><li>Drag across empty cells for a plain bin; <b>Fill empty cells</b> does the rest.</li><li>Bins too tall for the drawer, or overlapping, turn red.</li></ul>', phase: 'bins' },
     { target: 'details[data-key=make]', title: '4. Make', wait: 2000, html:

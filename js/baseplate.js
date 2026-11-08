@@ -15,6 +15,16 @@ var TT = window.TT = window.TT || {};
     cell: [[2.15, 0], [2.15, 2.5], [0.4, 4.25], [-0.01, 4.25], [-0.01, 3.5], [1.33, 2.16], [1.33, 0]]
   };
 
+  // Printed baseplate styles. ultralight: the profile above. standard: the full Gridfinity
+  // baseplate profile (0.7 chamfer, 1.8 straight, 2.15 chamfer = 4.65 tall), a solid frame with
+  // an open bottom. magnet: the standard frame on a floor (lift mm) with a 6.5 × 2.4 mm magnet
+  // pocket at each foot's 4 magnet spots. lift = how far bins stand above the drawer floor.
+  B.styles = {
+    ultralight: { name: 'Ultralight', cell: B.cell, height: B.height, lift: 0 },
+    standard: { name: 'Standard', cell: [[2.85, 0], [2.15, 0.7], [2.15, 2.5], [0, 4.65], [-0.01, 4.65], [-0.01, 0]], height: 4.65, lift: 0 },
+    magnet: { name: 'Magnet', cell: [[2.85, 0], [2.15, 0.7], [2.15, 2.5], [0, 4.65], [-0.01, 4.65], [-0.01, 0]], height: 4.65, lift: 3, skin: 0.6 }
+  };
+
   // ---------- Planning ----------
 
   // Split n cells along one axis into pieces no wider than maxMm (the outer pieces also carry
@@ -212,13 +222,28 @@ var TT = window.TT = window.TT || {};
 
   // One piece {kx, ky, pad: [l, b, r, t]}: a swept wall per cell, the outer wall, and on padded
   // sides a wall along the grid edge tied to the outer wall by ribs on the grid lines.
-  TT.bpMesh = function (pc) {
-    var P = B.pitch, R = B.radius, H = B.height, w = B.wall, pad = pc.pad;
+  // style: a key of B.styles (default ultralight).
+  TT.bpMesh = function (pc, style) {
+    var S = B.styles[style] || B.styles.ultralight, F = S.lift;
+    var P = B.pitch, R = B.radius, H = S.height, w = B.wall, pad = pc.pad;
     var W = pc.kx * P + pad[0] + pad[2], D = pc.ky * P + pad[1] + pad[3], gx0 = pad[0], gy0 = pad[1];
     var gx1 = gx0 + pc.kx * P, gy1 = gy0 + pc.ky * P, shells = [];
+    function up(prof) { return prof.map(function (p) { return [p[0], p[1] + F]; }); }
     for (var j = 0; j < pc.ky; j++) for (var i = 0; i < pc.kx; i++)
-      shells.push(sweep(gx0 + (i + 0.5) * P, gy0 + (j + 0.5) * P, P / 2, P / 2, R, B.cell));
-    shells.push(sweep(W / 2, D / 2, W / 2, D / 2, R, [[0, 0], [w, 0], [w, H], [0, H]]));
+      shells.push(sweep(gx0 + (i + 0.5) * P, gy0 + (j + 0.5) * P, P / 2, P / 2, R, up(S.cell)));
+    shells.push(sweep(W / 2, D / 2, W / 2, D / 2, R, up([[0, 0], [w, 0], [w, H], [0, H]])));
+    if (F > 0) {
+      // Floor: a solid skin, then the rest with the magnet pockets cut through it.
+      var outline = roundRectPts(0, 0, W, D, R, 8), M = TT.GF.magnet, holes = [], m = new Mesh();
+      for (j = 0; j < pc.ky; j++) for (i = 0; i < pc.kx; i++) [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(function (o) {
+        holes.push(TT.circle(gx0 + (i + 0.5) * P + o[0] * M.at, gy0 + (j + 0.5) * P + o[1] * M.at, (M.d + 0.1) / 2, 20));
+      });
+      TT.prism(m, [outline], 0, S.skin);
+      shells.push(new Float32Array(m.v));
+      m = new Mesh();
+      TT.prism(m, [outline].concat(holes), S.skin, F);
+      shells.push(m.done());
+    }
     // Where a wall along one edge may start so it stays inside the piece's rounded corner, when
     // it sits `off` mm in from the perpendicular edge.
     function inset(off) { return off >= R ? 0 : R - Math.sqrt(R * R - (R - off) * (R - off)) + 0.01; }
@@ -230,7 +255,7 @@ var TT = window.TT = window.TT || {};
       var a0 = Math.max(lo, inset(pad[s])), a1 = Math.min(hi, len - inset(pad[s]));
       var strip = s === 0 || s === 1 ? [e0, e0 + w] : [e0 - w, e0];
       var outer = s === 0 || s === 1 ? [0, e0 + w] : [e0 - w, horiz ? D : W];
-      function add(a, b, c, d) { shells.push(horiz ? box(a, c, b, d, 0, H) : box(c, a, d, b, 0, H)); }
+      function add(a, b, c, d) { shells.push(horiz ? box(a, c, b, d, F, F + H) : box(c, a, d, b, F, F + H)); }
       add(a0, a1, strip[0], strip[1]);
       for (var k = 0; k <= (horiz ? pc.kx : pc.ky); k++) {
         var at = lo + k * P;

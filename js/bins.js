@@ -50,23 +50,21 @@ var TT = window.TT = window.TT || {};
     return out;
   }
 
-  // opt = {kx, ky (grid units), units (7 mm), cx, cy (compartments), label, scoop, lip}.
-  // Returns {shells: [Float32Array], missingArea} like TT.pieceMesh.
+  // opt = {kx, ky (grid units), units (7 mm), cx, cy (compartments), label, scoop, lip, magnets,
+  // wall (mm, default 1.2), divH ('full' | 'half': divider height)}.
+  // Returns {shells: [Float32Array], accent: [Float32Array], missingArea}: shells is the whole bin;
+  // accent lists the dividers and label tabs (a second colour in a multicolour print).
   TT.stdBinMesh = function (opt) {
     var kx = Math.max(1, opt.kx | 0), ky = Math.max(1, opt.ky | 0);
     var nx = Math.max(1, opt.cx | 0), ny = Math.max(1, opt.cy | 0);
     var W = TT.binSize(kx), H = TT.binSize(ky), Z = Math.max(1, opt.units | 0) * G.unitH;
-    var fz = G.baseH + FLOOR, h = Z - fz, shells = [], missing = 0, m;
+    var WALL = Math.max(0.6, Math.min(3, +opt.wall || 1.2));
+    var fz = G.baseH + FLOOR, h = Z - fz, shells = [], accent = [], missing = 0, m;
+    var dz = opt.divH === 'half' ? fz + Math.max(1, h / 2) : Z; // divider top
 
     // Feet, one per grid cell (same as tool bins).
-    for (var gy = 0; gy < ky; gy++) for (var gx = 0; gx < kx; gx++) {
-      var cx = gx * G.pitch + 20.75, cy = gy * G.pitch + 20.75;
-      m = new TT.Mesh();
-      TT.loft(m, G.foot.map(function (f) {
-        return { z: f[0], pts: TT.roundRect(cx, cy, 41.5 - 2 * f[1], 41.5 - 2 * f[1], G.radius - f[1], 8) };
-      }));
-      shells.push(new Float32Array(m.v));
-    }
+    for (var gy = 0; gy < ky; gy++) for (var gx = 0; gx < kx; gx++)
+      shells = shells.concat(TT.footShells(gx * G.pitch + 20.75, gy * G.pitch + 20.75, opt.magnets));
 
     // Base slab up to the floor, then the outer wall (outline with an inset hole).
     var outline = TT.roundRect(W / 2, H / 2, W, H, G.radius, 8);
@@ -80,16 +78,17 @@ var TT = window.TT = window.TT || {};
 
     // Compartment dividers, overlapping the floor and walls by 0.2.
     var xs = cells(WALL, W - WALL, nx), ys = cells(WALL, H - WALL, ny), i;
-    for (i = 1; i < nx; i++) shells.push(box(xs[i - 1][1], WALL - 0.2, xs[i][0], H - WALL + 0.2, fz - 0.2, Z));
-    for (i = 1; i < ny; i++) shells.push(box(WALL - 0.2, ys[i - 1][1], W - WALL + 0.2, ys[i][0], fz - 0.2, Z));
+    for (i = 1; i < nx; i++) accent.push(box(xs[i - 1][1], WALL - 0.2, xs[i][0], H - WALL + 0.2, fz - 0.2, dz));
+    for (i = 1; i < ny; i++) accent.push(box(WALL - 0.2, ys[i - 1][1], W - WALL + 0.2, ys[i][0], fz - 0.2, dz));
 
     // Per compartment row: label tab on the back face (flat top, 45° underside) and finger scoop
     // on the front face (quarter circle down to the floor). Both run the full inner width.
     ys.forEach(function (r) {
       var depth = r[1] - r[0];
       if (opt.label) {
-        var d = Math.min(LABEL, depth * 0.4, h - 0.5), yb = r[1];
-        if (d > 0.3) shells.push(bar([[yb + OVER, Z], [yb - d, Z], [yb + OVER, Z - d - OVER]], WALL, W - WALL));
+        // On a divider (not the back wall) the tab sits at the divider's top.
+        var tz = r[1] < H - WALL - 0.01 ? dz : Z, d = Math.min(LABEL, depth * 0.4, tz - fz - 0.5), yb = r[1];
+        if (d > 0.3) accent.push(bar([[yb + OVER, tz], [yb - d, tz], [yb + OVER, tz - d - OVER]], WALL, W - WALL));
       }
       if (opt.scoop) {
         var s = Math.min(SCOOP, h / 2, depth * 0.5), yf = r[0], prof = [[yf - OVER, fz - OVER], [yf + s, fz - OVER]];
@@ -107,6 +106,6 @@ var TT = window.TT = window.TT || {};
     // Stacking lip on top of the outer wall; its support stops just inside the floor.
     if (opt.lip) shells.push(TT.sweep(W / 2, H / 2, W / 2, H / 2, G.radius, TT.lipProfile(Z, fz - 0.2)));
 
-    return { shells: shells, missingArea: missing };
+    return { shells: shells.concat(accent), body: shells, accent: accent, missingArea: missing };
   };
 })();
