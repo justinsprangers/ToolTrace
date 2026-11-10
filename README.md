@@ -84,6 +84,7 @@ Press **?** (or **Shortcuts** above the picture) for every keyboard shortcut.
 - **Height** comes from the deepest pocket plus the **Min floor**, or set it yourself.
 - **Pocket edge chamfer:** a 45° bevel around the top of every pocket so tools drop in easily (default 1 mm; 0 turns it off). It's printed as ~0.2 mm steps and is always kept shallower than the shallowest pocket.
 - **Max units per print:** 6 fits a 256 mm bed. Wider bins are split at grid lines into pieces; each piece is a normal bin and the pocket runs across the join.
+- **Dovetail joints between pieces:** each joint between split pieces gets one dovetail per cell (10 mm neck, 15 mm wide, 7 mm deep, 0.2 mm clearance per side). The tab runs from the top of the feet to the top of the bin, so the pieces slide together from above and lock into one bin.
 - **Generate model** builds the mesh, checks that every body is closed, and shows a 3D preview (drag to turn, scroll to zoom).
 - **Stacking lip** and **Magnet holes** (6 × 2 mm, 4 per cell) are also set here (or in the design's panel on the Bins tab).
 - **Download** the bin as a 3MF (all pieces), one STL per piece, or a 1:1 SVG of the pocket outlines (e.g. for laser-cut foam).

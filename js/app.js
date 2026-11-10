@@ -870,7 +870,7 @@
     C.clearance.set(L.clearance); C.wall.set(L.wall);
     if (C.floor) { C.floor.set(L.floor); C.maxUnits.set(L.maxUnits); C.chamfer.set(L.chamfer); }
     $('autoUnits').checked = L.autoUnits; $('units').value = L.units;
-    $('genLip').checked = !!L.lip; $('genMag').checked = !!L.magnets;
+    $('genLip').checked = !!L.lip; $('genMag').checked = !!L.magnets; $('genDove').checked = !!L.dovetail;
   }
 
   function selItem() { return L.items.find(function (it) { return it.uid === S.sel; }) || null; }
@@ -1097,6 +1097,7 @@
   $('autoUnits').onchange = function () { L.autoUnits = this.checked; invalidate(); save(); };
   $('genLip').onchange = function () { L.lip = this.checked; invalidate(); save(); };
   $('genMag').onchange = function () { L.magnets = this.checked; invalidate(); save(); };
+  $('genDove').onchange = function () { L.dovetail = this.checked; invalidate(); save(); };
   $('units').oninput = function () { L.units = Math.max(1, Math.round(+this.value) || 1); L.autoUnits = false; $('autoUnits').checked = false; invalidate(); save(); };
   $('generate').onclick = generate;
 

@@ -329,6 +329,67 @@ var TT = window.TT = window.TT || {};
     return [new Float32Array(m.v), new Float32Array(m2.v)];
   };
 
+  // ---------- Dovetail joints between the pieces of a split bin ----------
+  // A piece gets tabs on its +x and +y (bin y-down) edges that reach into the next piece, and
+  // sockets (the neighbour's tabs grown by the clearance) on its -x and -y edges. Tabs run from
+  // the top of the feet (baseH) to the top of the bin, so the pieces join by sliding one down
+  // into the other; one tab per grid cell along the joint, centred on the cell.
+  G.dove = { neck: 10, flare: 15, depth: 7, clear: 0.2 };
+
+  // Tabs a piece sends into its neighbours, as convex quads in bin mm (y down).
+  function doveTabs(L, pc) {
+    var D = G.dove, out = [], X1 = pc.ix * G.pitch + TT.binSize(pc.kx), Y1 = pc.iy * G.pitch + TT.binSize(pc.ky);
+    if (pc.ix + pc.kx < L.nx) for (var r = 0; r < pc.ky; r++) {
+      var cy = (pc.iy + r) * G.pitch + 20.75, xb = X1 + G.gap + D.depth;
+      out.push([[X1 - 0.5, cy - D.neck / 2], [xb, cy - D.flare / 2], [xb, cy + D.flare / 2], [X1 - 0.5, cy + D.neck / 2]]);
+    }
+    if (pc.iy + pc.ky < L.ny) for (var c = 0; c < pc.kx; c++) {
+      var cx = (pc.ix + c) * G.pitch + 20.75, yb = Y1 + G.gap + D.depth;
+      out.push([[cx - D.neck / 2, Y1 - 0.5], [cx + D.neck / 2, Y1 - 0.5], [cx + D.flare / 2, yb], [cx - D.flare / 2, yb]]);
+    }
+    return out;
+  }
+  // Signed distance to a convex polygon (negative inside).
+  function sdConvex(x, y, poly) {
+    var d = Infinity, inside = true, n = poly.length;
+    for (var i = 0; i < n; i++) {
+      var a = poly[i], b = poly[(i + 1) % n], ex = b[0] - a[0], ey = b[1] - a[1], px = x - a[0], py = y - a[1];
+      var t = Math.max(0, Math.min(1, (px * ex + py * ey) / (ex * ex + ey * ey)));
+      d = Math.min(d, Math.hypot(px - t * ex, py - t * ey));
+      if (ex * py - ey * px < 0) inside = false; // inside = left of every edge (positive shoelace area)
+    }
+    return inside ? -d : d;
+  }
+  // The piece's own outline as a signed distance function of bin mm (x, y down), plus how far its
+  // tabs stick out past its +x / +y edges. Without dovetails: the plain rounded rectangle.
+  function pieceRegion(L, pc) {
+    var W = TT.binSize(pc.kx), H = TT.binSize(pc.ky), X0 = pc.ix * G.pitch, Y0 = pc.iy * G.pitch;
+    var rect = function (x, y) { return sdRoundRect(x, y, X0 + W / 2, Y0 + H / 2, W / 2, H / 2, G.radius); };
+    if (!L.dovetail || TT.pieces(L).length < 2) return { sd: rect, ex: 0, ey: 0 };
+    var tabs = doveTabs(L, pc), socks = [], D = G.dove;
+    if (pc.ix > 0) socks = socks.concat(doveTabs(L, { ix: pc.ix - pieceSize(L, 'x', pc.ix - 1), kx: pieceSize(L, 'x', pc.ix - 1), iy: pc.iy, ky: pc.ky }).filter(function (q) { return q[0][0] === q[3][0]; }));
+    if (pc.iy > 0) socks = socks.concat(doveTabs(L, { ix: pc.ix, kx: pc.kx, iy: pc.iy - pieceSize(L, 'y', pc.iy - 1), ky: pieceSize(L, 'y', pc.iy - 1) }).filter(function (q) { return q[0][1] === q[1][1]; }));
+    // sdConvex wants a positive shoelace area: reverse any quad that isn't.
+    var cw = function (q) { var a = 0; for (var i = 0; i < q.length; i++) { var p = q[i], r = q[(i + 1) % q.length]; a += p[0] * r[1] - r[0] * p[1]; } return a > 0 ? q : q.slice().reverse(); };
+    tabs = tabs.map(cw); socks = socks.map(cw);
+    return {
+      sd: function (x, y) {
+        var d = rect(x, y), k;
+        for (k = 0; k < tabs.length; k++) d = Math.min(d, sdConvex(x, y, tabs[k]));
+        for (k = 0; k < socks.length; k++) d = Math.max(d, D.clear - sdConvex(x, y, socks[k]));
+        return d;
+      },
+      dove: true, ex: pc.ix + pc.kx < L.nx ? G.gap + D.depth : 0, ey: pc.iy + pc.ky < L.ny ? G.gap + D.depth : 0
+    };
+  }
+  // Width (cells) of the piece that ends just before cell `at` along an axis.
+  function pieceSize(L, axis, at) {
+    var parts = splitAxis(axis === 'x' ? L.nx : L.ny, L.maxUnits);
+    for (var i = 0; i < parts.length; i++) if (at >= parts[i][0] && at < parts[i][0] + parts[i][1]) return parts[i][1];
+    return 1;
+  }
+  TT.doveTabs = doveTabs; TT.pieceRegion = pieceRegion;
+
   // Shared with bins.js (standard bins).
   TT.Mesh = Mesh; TT.loft = loft; TT.roundRect = roundRect; TT.prism = prism; TT.circle = circle;
 
@@ -344,8 +405,21 @@ var TT = window.TT = window.TT || {};
       feet = feet.concat(TT.footShells(gx * G.pitch + 20.75, H - (gy * G.pitch + 20.75), L.magnets));
 
     var floors = fields.map(function (f) { return top - f.depth; }), firstFloor = floors.length ? floors[0] : top;
-    var body = new Mesh(), outline = roundRect(W / 2, H / 2, W, H, G.radius, 8);
-    loft(body, [{ z: G.baseH, pts: outline }, { z: firstFloor, pts: outline }]);
+    var region = pieceRegion(L, pc), res = G.res;
+    var gw = Math.round((W + 2 + region.ex) / res) + 1, gh = Math.round((H + 2 + region.ey) / res) + 1;
+    var body = new Mesh();
+    if (region.dove) {
+      // Dovetailed piece: the body is the piece's outline with its tabs and sockets.
+      var rg = new Float32Array(gw * gh);
+      for (var j = 0; j < gh; j++) for (var i = 0; i < gw; i++) rg[j * gw + i] = region.sd(X0 - 1 + i * res, Y0 - 1 + j * res);
+      var bl = TT.contours(rg, gw, gh).map(function (l) {
+        return TT.simplify(l, 0.04).map(function (p) { return [-1 + p[0] * res, H - (-1 + p[1] * res)]; });
+      }).filter(function (l) { return l.length >= 3; });
+      missing += prism(body, bl, G.baseH, firstFloor);
+    } else {
+      var outline = roundRect(W / 2, H / 2, W, H, G.radius, 8);
+      loft(body, [{ z: G.baseH, pts: outline }, { z: firstFloor, pts: outline }]);
+    }
     shells.push(body);
 
     // Layers: one per pocket depth. The top edge chamfer (45°, L.chamfer mm, kept shallower than
@@ -369,10 +443,10 @@ var TT = window.TT = window.TT || {};
       var pf = ly.pf, z0 = ly.z0, z1 = ly.z1;
       if (z1 - z0 < 1e-6) return;
       var i0 = Math.round(X0 / pf.res), j0 = Math.round(Y0 / pf.res);
-      var w = Math.round((W + 2) / pf.res) + 1, h = Math.round((H + 2) / pf.res) + 1, g = new Float32Array(w * h);
+      var w = Math.min(gw, pf.w - i0), h = Math.min(gh, pf.h - j0), g = new Float32Array(w * h);
       for (var j = 0; j < h; j++) for (var i = 0; i < w; i++) {
         var x = -1 + i * pf.res, y = -1 + j * pf.res;
-        g[j * w + i] = Math.max(sdRoundRect(x, y, W / 2, H / 2, W / 2, H / 2, G.radius), -(pf.f[(j + j0) * pf.w + (i + i0)] - ly.off));
+        g[j * w + i] = Math.max(region.sd(X0 + x, Y0 + y), -(pf.f[(j + j0) * pf.w + (i + i0)] - ly.off));
       }
       var loops = TT.contours(g, w, h).map(function (l) {
         return TT.simplify(l, 0.04).map(function (p) { return [-1 + p[0] * pf.res, H - (-1 + p[1] * pf.res)]; });

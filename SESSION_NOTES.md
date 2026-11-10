@@ -23,6 +23,7 @@
 - STEP export skipped: a faceted STEP from triangle meshes gives no benefit over 3MF.
 
 ## Log
+- 2026-11-10: Dovetail joints between split pieces (Generate → Dovetail joints). Not yet printed.
 - 2026-11-07: Removed the filament-color option at the user's request (not what they wanted); US spelling throughout.
 - 2026-11-07: Baseplate styles (standard, magnet), bin presets, magnet holes, walls, half dividers, simple-shape pockets, live design 3D preview, drawer 3D view, 3MF downloads everywhere. Mesh checks pass for every option combination; scripted UI tests and the tutorial pass on the user's real data.
 - 2026-10-30: Fixed GitHub Pages stale-script crash (`?v=`); Bins polish (toolbar, tool steps only while editing, per-tab status).

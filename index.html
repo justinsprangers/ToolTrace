@@ -452,6 +452,7 @@
       <div class="field"><label>Height units (7 mm)</label><input type="number" id="units" value="3" min="1"></div>
       <label class="check"><input type="checkbox" id="genLip"> Stacking lip</label>
       <label class="check"><input type="checkbox" id="genMag"> Magnet holes (6 × 2 mm magnets)</label>
+      <label class="check" title="When a bin is split into pieces (Max units per print), each joint gets one dovetail per cell. The pieces slide together from above; 0.2 mm clearance per side."><input type="checkbox" id="genDove"> Dovetail joints between pieces</label>
       <div id="genCtls"></div>
       <div class="btns"><button class="b primary" id="generate">Generate model</button><button class="b" data-reset="genCtls">Restore defaults</button></div>
       <div id="genInfo" class="info"></div>
@@ -577,16 +578,16 @@
   <table><tr><td><kbd>G</kbd></td><td>Generate model</td></tr></table>
 </dialog>
 <!-- ?v= makes browsers (and GitHub Pages' cache) fetch new scripts with a new page; bump it on every change. -->
-<script src="js/earcut.js?v=9"></script>
-<script src="js/vision.js?v=9"></script>
-<script src="js/grid.js?v=9"></script>
-<script src="js/gridfinity.js?v=9"></script>
-<script src="js/baseplate.js?v=9"></script>
-<script src="js/zip.js?v=9"></script>
-<script src="js/make.js?v=9"></script>
-<script src="js/preview3d.js?v=9"></script>
-<script src="js/bins.js?v=9"></script>
-<script src="js/app.js?v=9"></script>
-<script src="js/tour.js?v=9"></script>
+<script src="js/earcut.js?v=10"></script>
+<script src="js/vision.js?v=10"></script>
+<script src="js/grid.js?v=10"></script>
+<script src="js/gridfinity.js?v=10"></script>
+<script src="js/baseplate.js?v=10"></script>
+<script src="js/zip.js?v=10"></script>
+<script src="js/make.js?v=10"></script>
+<script src="js/preview3d.js?v=10"></script>
+<script src="js/bins.js?v=10"></script>
+<script src="js/app.js?v=10"></script>
+<script src="js/tour.js?v=10"></script>
 </body>
 </html>
