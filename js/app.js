@@ -1759,8 +1759,14 @@
       $('desStdMore').hidden = d.kind === 'tool';
       $('desWall').value = String(d.opt.wall || 1.2); $('desDivH').value = d.opt.divH || 'full';
       $('desEditTool').hidden = d.kind !== 'tool';
+      // Pieces this tool bin prints in on the project's bed; the dovetail box shows for tool bins.
+      var lay = d.layout || {}, cap = Math.max(1, Math.min(lay.maxUnits || 6, Math.floor((BPS.maxPrint + G.gap) / TT.BP.pitch)));
+      var npc = d.kind === 'tool' ? TT.pieces({ nx: d.kx, ny: d.ky, maxUnits: cap }).length : 1;
+      $('desDoveRow').hidden = d.kind !== 'tool';
+      $('desDove').checked = !!lay.dovetail;
       later('desView', drawDesView, 60);
       $('desInfo').textContent = (d.kind === 'tool' ? 'Size comes from the tool layout. ' : '') + dims([TT.binSize(d.kx), TT.binSize(d.ky), binTop(d)]) + '. ' +
+        (npc > 1 ? 'Prints in ' + npc + ' pieces' + (lay.dovetail ? ' that dovetail together' : ' (tick Dovetail joints to lock them together)') + '. ' : '') +
         (n ? 'Changes apply to ' + (n > 1 ? 'all ' + n + ' placed copies.' : 'the placed copy.') : 'Not in the drawer yet: press Place, or drag it from the list onto the drawer.');
     }
 
@@ -1825,6 +1831,13 @@
     if (!d) return;
     d.opt.magnets = on;
     if (d.kind === 'tool') editToolLayout(d, function (l) { l.magnets = on; });
+    binsChanged();
+  };
+  // Same setting as Generate's "Dovetail joints between pieces" (L.dovetail), so it can be set from Bins too.
+  $('desDove').onchange = function () {
+    var d = selDesign(), on = this.checked;
+    if (!d || d.kind !== 'tool') return;
+    editToolLayout(d, function (l) { l.dovetail = on; });
     binsChanged();
   };
   $('desWall').onchange = function () { var d = selDesign(); if (d) { d.opt.wall = +this.value; binsChanged(); } };
