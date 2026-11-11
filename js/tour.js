@@ -74,6 +74,8 @@ var TT = window.TT = window.TT || {};
       '<ul><li>Inside width, depth and height, at the narrowest point.</li><li>The picture shows how many 42 mm cells fit.</li></ul>', phase: 'drawer' },
     { target: '#drPlate', title: 'Baseplate type', html:
       '<ul><li><b>3D printed</b>: ultralight pieces sized for your bed.</li><li><b>Laser-cut</b>: one sheet with a hole per cell.</li><li><b>None</b>: bins sit loose.</li></ul>', phase: 'drawer' },
+    { target: '.drsel', title: 'Several drawers', html:
+      '<ul><li>One project can hold several drawers. Switch here; <b>+ Drawer</b> adds one.</li><li>Each drawer has its own size, baseplate, bins and checklist. Bin designs are shared.</li></ul>', phase: 'drawer' },
     { target: 'details[data-key=bpArea]', title: '2. Baseplate', html:
       '<ul><li>Style: <b>Ultralight</b> (least plastic), <b>Standard</b> (full profile) or <b>Magnet</b> (pockets for 6 × 2 mm magnets).</li><li><b>Pad edges</b> fills the drawer exactly; <b>one corner</b> keeps more pieces standard.</li><li><b>Max print size</b> is your bed size. Print the <b>test piece</b> first.</li></ul>', phase: 'baseplate' },
     { target: 'details[data-key=binDesigns]', title: '3. Bin designs', html:

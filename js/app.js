@@ -117,8 +117,9 @@
   }
 
   $('saveProject').onclick = function () {
-    var name = (DR.name || 'tooltrace-project').replace(/[^\w.-]+/g, '_');
-    download(name + '.json', JSON.stringify({ app: 'ToolTrace', version: 4, lib: S.lib, libOrder: S.libOrder, L: L, project: PRJ }), 'application/json');
+    stashDrawer();
+    var first = PRJ.drawers[0], name = ((PRJ.drawers.length > 1 ? PRJ.name : '') || DR.name || (first && first.drawer.name) || 'tooltrace-project').replace(/[^\w.-]+/g, '_');
+    download(name + '.json', JSON.stringify({ app: 'ToolTrace', version: 5, lib: S.lib, libOrder: S.libOrder, L: L, project: PRJ }), 'application/json');
   };
   $('openProject').onclick = function () { $('projectFile').click(); };
   $('projectFile').onchange = function () {
@@ -126,7 +127,7 @@
     if (!f) return;
     f.text().then(function (t) {
       var d = JSON.parse(t);
-      if (d.project && (S.libOrder.length || PRJ.designs.length) && !confirm('Replace the current drawer, bins and library with this project?')) return;
+      if (d.project && (S.libOrder.length || PRJ.designs.length) && !confirm('Replace the current drawers, bins and library with this project?')) return;
       // A version 3+ file replaces the drawer; an older one adds its layout as a new tool bin design
       // and its shapes to the library (so the other tool designs keep theirs).
       S.binSel = S.desSel = S.placing = null;
@@ -182,7 +183,7 @@
     // Leaving the tool-bin steps for Bins shows the design that was being edited; a new one left
     // without tools (and not placed) is discarded rather than cluttering the list.
     var cd = p === 'bins' && /^(capture|layout|generate)$/.test(S.phase) && designById(S.curDesign);
-    var discarded = cd && !L.items.length && !placedOf(cd).length;
+    var discarded = cd && !L.items.length && !placedAnywhere(cd).length;
     if (discarded) deleteDesign(cd);
     else if (cd) { S.desSel = cd.id; S.binSel = null; }
     S.phase = p;
@@ -1160,24 +1161,56 @@
     button('Pocket outline (SVG, 1:1)', function () { download(base + '_outline.svg', TT.svg(L, S.gen.fields), 'image/svg+xml'); });
   }
 
-  // ---------- Project: one drawer (space, baseplate, bins, checklist) ----------
+  // ---------- Project: bin designs + one or more drawers ----------
 
-  // All sizes in mm; drawer.unit only changes how sizes are shown and typed. Saved in localStorage
-  // (`tooltrace.project`) and in project files. bins: see the Bins tab; done: Make checklist ticks.
+  // A project holds the bin designs (shared) and a list of drawers. Each drawer has its own space
+  // (DR), baseplate settings (BPS), placed bins and Make checklist. The drawer being edited lives in
+  // DR / BPS / PRJ.bins / PRJ.done, which the rest of the code uses; PRJ.drawers keeps every drawer
+  // ({id, drawer, baseplate, bins, done}) and stashDrawer() copies the live one back before saving or
+  // switching. All sizes in mm; drawer.unit only changes how sizes are shown and typed. Saved in
+  // localStorage (`tooltrace.project`) and in project files (version 5; drawer / baseplate / bins /
+  // done at the top level are the current drawer, so older versions open its first drawer).
   var DR = { name: '', w: 500, d: 400, h: 60, unit: 1, plate: 'print' };
   var BPS = { clearance: 0.5, fill: true, oneCorner: false, corner: 'rb', maxPrint: 180, minRows: 2, hole: 37.5, kerf: 0.15, style: 'ultralight' };
-  var PRJ = { drawer: DR, baseplate: BPS, designs: [], bins: [], done: {} };
+  var DR0 = JSON.parse(JSON.stringify(DR)), BPS0 = JSON.parse(JSON.stringify(BPS));
+  var PRJ = { drawer: DR, baseplate: BPS, designs: [], bins: [], done: {}, drawers: [], curDrawer: null };
   // 3D view colors: baseplate, standard bins, tool bins (same hues as the plan view).
   var COLOR3D = { plate: '#c5ccd6', std: '#8fbfee', tool: '#f2b27a' };
   function loadProject(d) {
     if (!d) return;
-    if (d.drawer) Object.assign(DR, d.drawer);
-    if (d.baseplate) Object.assign(BPS, d.baseplate);
-    PRJ.done = d.done || {}; PRJ.cur = d.cur || null;
-    delete BPS.color; // from the removed filament-color option
-    if (d.designs) { PRJ.designs = d.designs; PRJ.bins = d.bins || []; } else migrateBins(d.bins || [], d.cur);
+    PRJ.cur = d.cur || null;
+    var oldBins = null;
+    if (d.designs) PRJ.designs = d.designs; else { migrateBins(d.bins || [], d.cur); oldBins = PRJ.bins; }
     PRJ.designs.forEach(function (x) { x.opt = Object.assign(optDefaults(x.kind), x.opt); delete x.opt.color; delete x.opt.accent; });
-    PRJ.bins = PRJ.bins.filter(function (b) { b.rot = b.rot || 0; return PRJ.designs.some(function (x) { return x.id === b.design; }); });
+    var list = d.drawers && d.drawers.length ? d.drawers
+      : [{ id: d.curDrawer, drawer: d.drawer || DR, baseplate: d.baseplate || BPS, bins: oldBins || d.bins || [], done: d.done || {} }];
+    PRJ.drawers = list.map(function (e) {
+      return { id: e.id || uid(), drawer: Object.assign({}, DR0, e.drawer), baseplate: Object.assign({}, BPS0, e.baseplate),
+        bins: (e.bins || []).filter(function (b) { b.rot = b.rot || 0; return PRJ.designs.some(function (x) { return x.id === b.design; }); }), done: e.done || {} };
+    });
+    useDrawer(drawerById(d.curDrawer) || PRJ.drawers[0]);
+  }
+  function drawerById(id) { return PRJ.drawers.find(function (e) { return e.id === id; }) || null; }
+  function curDrawerEntry() { return drawerById(PRJ.curDrawer); }
+  // Make a drawer the live one (no redraw; callers refresh the UI).
+  function useDrawer(e) {
+    Object.keys(DR).forEach(function (k) { delete DR[k]; }); Object.assign(DR, DR0, e.drawer);
+    Object.keys(BPS).forEach(function (k) { delete BPS[k]; }); Object.assign(BPS, BPS0, e.baseplate);
+    delete BPS.color; // from the removed filament-color option
+    PRJ.bins = e.bins; PRJ.done = e.done; PRJ.curDrawer = e.id;
+  }
+  // Copy the live drawer back into its entry in PRJ.drawers.
+  function stashDrawer() {
+    var e = curDrawerEntry();
+    if (!e) { e = { id: uid() }; PRJ.drawers.push(e); PRJ.curDrawer = e.id; }
+    e.drawer = JSON.parse(JSON.stringify(DR)); e.baseplate = JSON.parse(JSON.stringify(BPS)); e.bins = PRJ.bins; e.done = PRJ.done;
+  }
+  function drawerLabel(e, k) { var n = e.id === PRJ.curDrawer ? DR.name : e.drawer && e.drawer.name; return n || 'Drawer ' + (k + 1); }
+  // Every placed bin in every drawer.
+  function allBins() {
+    var out = PRJ.bins.slice();
+    PRJ.drawers.forEach(function (e) { if (e.id !== PRJ.curDrawer) out = out.concat(e.bins); });
+    return out;
   }
   // Before designs, each bin in the drawer was its own design: each becomes a design plus one
   // placed copy, and identical standard bins share a design.
@@ -1205,7 +1238,9 @@
     loadProject(JSON.parse(localStorage.getItem('tooltrace.project') || 'null'));
     if (oldBp) saveProject();
   } catch (e) { /* storage unavailable or corrupt */ }
+  if (!PRJ.drawers.length) stashDrawer(); // a new project starts with one drawer
   function saveProject() {
+    stashDrawer();
     try { localStorage.setItem('tooltrace.project', JSON.stringify(PRJ)); localStorage.removeItem('tooltrace.baseplate'); } catch (e) { /* storage unavailable */ }
   }
 
@@ -1221,7 +1256,63 @@
       if (v > 0) { DR[f[1]] = v * DR.unit; bpChanged(); }
     };
   });
-  $('drName').oninput = function () { DR.name = this.value; saveProject(); };
+  $('drName').oninput = function () { DR.name = this.value; saveProject(); drawerUI(); };
+
+  // ---------- Drawers in the project ----------
+  // Header menu + the Drawer tab's list. Switching keeps the phase (Bins stays on Bins, etc.).
+  function drawerUI() {
+    var sel = $('drSel');
+    sel.innerHTML = PRJ.drawers.map(function (e, k) {
+      var n = e.id === PRJ.curDrawer ? PRJ.bins.length : e.bins.length;
+      return '<option value="' + e.id + '">' + esc(drawerLabel(e, k)) + ' (' + n + ' bin' + (n === 1 ? '' : 's') + ')</option>';
+    }).join('');
+    sel.value = PRJ.curDrawer;
+    $('prjName').value = PRJ.name || '';
+    var box = $('drList');
+    box.innerHTML = '';
+    PRJ.drawers.forEach(function (e, k) {
+      var cur = e.id === PRJ.curDrawer, dr = cur ? DR : e.drawer, n = cur ? PRJ.bins.length : e.bins.length, row = document.createElement('div');
+      row.className = 'shaperow' + (cur ? ' on' : '');
+      row.innerHTML = '<span>' + esc(drawerLabel(e, k)) + '</span><small>' + Math.round(dr.w) + ' × ' + Math.round(dr.d) + ' × ' + Math.round(dr.h) + ' mm · ' + n + ' bin' + (n === 1 ? '' : 's') + '</small>';
+      row.onclick = function () { switchDrawer(e.id); };
+      box.appendChild(row);
+    });
+    $('drDel').disabled = PRJ.drawers.length < 2;
+  }
+  function switchDrawer(id, msg) {
+    if (id === PRJ.curDrawer && !msg) return;
+    stashDrawer();
+    useDrawer(drawerById(id));
+    S.binSel = null; S.placing = null; S.make = null; S.bins3d = null;
+    S.views.bins = { fit: true }; S.views.baseplate = { fit: true };
+    projectLoaded(); renderBins();
+    if (S.phase === 'make') renderMake();
+    draw();
+    status(msg || 'Now working on ' + (DR.name || 'drawer ' + (PRJ.drawers.indexOf(curDrawerEntry()) + 1)) + '.');
+  }
+  // A new drawer: same size and baseplate as this one, no bins yet.
+  function addDrawer(copyBins) {
+    stashDrawer();
+    var src = curDrawerEntry(), e = { id: uid(), drawer: JSON.parse(JSON.stringify(src.drawer)), baseplate: JSON.parse(JSON.stringify(src.baseplate)), bins: [], done: {} };
+    e.drawer.name = copyBins ? (src.drawer.name || 'Drawer') + ' copy' : 'Drawer ' + (PRJ.drawers.length + 1);
+    if (copyBins) e.bins = src.bins.map(function (b) { return Object.assign({}, b, { id: uid() }); });
+    PRJ.drawers.splice(PRJ.drawers.indexOf(src) + 1, 0, e);
+    switchDrawer(e.id, copyBins ? 'Duplicated the drawer with its ' + e.bins.length + ' bins.' : 'Added ' + e.drawer.name + ' (same size as the last one; change it under Drawer).');
+  }
+  $('drSel').onchange = function () { switchDrawer(this.value); };
+  $('drAdd').onclick = function () { addDrawer(false); };
+  $('drDup').onclick = function () { addDrawer(true); };
+  $('drDel').onclick = function () {
+    if (PRJ.drawers.length < 2) return;
+    var e = curDrawerEntry(), name = DR.name || 'this drawer';
+    if (!confirm('Delete ' + name + ' and the ' + PRJ.bins.length + ' bins placed in it? The bin designs stay in the project.')) return;
+    var k = PRJ.drawers.indexOf(e);
+    PRJ.drawers.splice(k, 1);
+    useDrawer(PRJ.drawers[Math.max(0, k - 1)]); // the entry was removed, so nothing to stash
+    prunePlain();
+    switchDrawer(PRJ.curDrawer, 'Deleted ' + name + '.');
+  };
+  $('prjName').oninput = function () { PRJ.name = this.value; saveProject(); };
   $('bpUnit').onchange = function () { DR.unit = +this.value; drInputs(); bpChanged(); };
   segButtons('drPlate', function (m) { DR.plate = m; if (m === 'laser') S.bpView = 'laser'; bpChanged(); });
   $('drNext').onclick = function () { setPhase('baseplate'); };
@@ -1292,7 +1383,7 @@
   function projectLoaded() {
     bpInputs();
     C.bpClear.set(BPS.clearance); C.bpMax.set(BPS.maxPrint); C.bpMin.set(BPS.minRows); C.bpHole.set(BPS.hole); C.bpKerf.set(BPS.kerf);
-    saveProject(); bpUpdate();
+    saveProject(); bpUpdate(); drawerUI();
   }
 
   function bpChanged() {
@@ -1388,7 +1479,8 @@
   function designById(id) { return PRJ.designs.find(function (d) { return d.id === id; }) || null; }
   function binById(id) { return PRJ.bins.find(function (b) { return b.id === id; }) || null; }
   function designOf(b) { return designById(b.design); }
-  function placedOf(d) { return PRJ.bins.filter(function (b) { return b.design === d.id; }); }
+  function placedOf(d) { return PRJ.bins.filter(function (b) { return b.design === d.id; }); } // in this drawer
+  function placedAnywhere(d) { return allBins().filter(function (b) { return b.design === d.id; }); } // in any drawer
   function autoName(d) {
     if (d.kind !== 'tool') return 'Bin ' + d.kx + '×' + d.ky;
     var k = PRJ.designs.filter(function (x) { return x.kind === 'tool'; }).indexOf(d) + 1;
@@ -1554,7 +1646,7 @@
   function prunePlain() {
     var plain = JSON.stringify(optDefaults('std'));
     PRJ.designs = PRJ.designs.filter(function (d) {
-      return !(d.auto && !d.name && !placedOf(d).length && JSON.stringify(Object.assign(optDefaults('std'), d.opt)) === plain);
+      return !(d.auto && !d.name && !placedAnywhere(d).length && JSON.stringify(Object.assign(optDefaults('std'), d.opt)) === plain);
     });
     if (S.desSel && !designById(S.desSel)) S.desSel = null;
   }
@@ -1562,6 +1654,7 @@
   // Delete a design and every placed copy of it.
   function deleteDesign(d) {
     PRJ.bins = PRJ.bins.filter(function (b) { return b.design !== d.id; });
+    PRJ.drawers.forEach(function (e) { if (e.id !== PRJ.curDrawer) e.bins = e.bins.filter(function (b) { return b.design !== d.id; }); });
     PRJ.designs = PRJ.designs.filter(function (x) { return x !== d; });
     if (S.desSel === d.id) S.desSel = null;
     if (S.binSel && !binById(S.binSel)) S.binSel = null;
@@ -1589,7 +1682,7 @@
     saveProject();
   }
 
-  function binsChanged() { S.make = null; S.bins3d = null; saveProject(); renderBins(); draw(); }
+  function binsChanged() { S.make = null; S.bins3d = null; saveProject(); renderBins(); drawerUI(); draw(); }
 
   // Change a tool design's layout whether or not it's the one in L.
   function editToolLayout(d, fn) {
@@ -1622,13 +1715,14 @@
     var list = $('desList'), probs = binProblems(), cells = 0;
     list.innerHTML = '';
     PRJ.designs.forEach(function (d) {
-      var n = placedOf(d).length, row = document.createElement('div');
+      var n = placedOf(d).length, elsewhere = placedAnywhere(d).length - n, row = document.createElement('div');
       row.className = 'shaperow' + (d.id === S.desSel ? ' on' : '');
       row.draggable = true;
       row.title = 'Click to edit' + (d.kind === 'tool' ? ' (double-click to edit its tools)' : '') + '; drag onto the drawer to place a copy';
       row.appendChild(designThumb(d));
       var tx = document.createElement('span');
-      tx.innerHTML = esc(designName(d)) + '<br><small style="margin:0">' + d.kx + ' × ' + d.ky + ' × ' + d.units + 'u · ' + (n ? n + ' placed' : 'not placed') + '</small>';
+      tx.innerHTML = esc(designName(d)) + '<br><small style="margin:0">' + d.kx + ' × ' + d.ky + ' × ' + d.units + 'u · ' + (n ? n + ' placed' : 'not placed') +
+        (elsewhere ? ' · ' + elsewhere + ' in other drawer' + (elsewhere > 1 ? 's' : '') : '') + '</small>';
       row.appendChild(tx);
       var pb = document.createElement('button');
       pb.className = 'b' + (n ? '' : ' primary'); pb.style.marginLeft = 'auto'; pb.textContent = 'Place'; pb.title = 'Put a copy in the drawer';
@@ -2171,7 +2265,7 @@
     });
     PRJ.designs.forEach(function (d) {
       var n = placedOf(d).length;
-      if (!n) { unplaced.push(designName(d)); return; }
+      if (!n) { if (!placedAnywhere(d).length) unplaced.push(designName(d)); return; } // ones in other drawers are made there
       if (d.kind === 'std') {
         var k = stdKey(d);
         if (!groups[k]) groups[k] = add({ key: 'std-' + k, group: 'bins', label: d.name ? d.name + ' (' + stdName(d).replace(/^Bin /, '') + ')' : stdName(d), count: 0,
@@ -2239,7 +2333,7 @@
         (grams ? ', up to ≈ ' + Math.round(grams) + ' g of PLA (solid volume; the slicer gives the real figure)' : '') + '\n' + done + ' of ' + total + ' done.') +
         (bad ? '\n<span class="warn">Mesh check failed on ' + bad + ' bodies.</span>' : m.rows.length ? '\n<span class="ok">Mesh check passed.</span>' : '') +
         (m.problems.length ? '\n<span class="warn">' + esc(m.problems.join('\n')) + '</span>' : '') +
-        (m.unplaced && m.unplaced.length ? '\n' + esc('Not in the drawer, so not made: ' + m.unplaced.join(', ') + '.') : '');
+        (m.unplaced && m.unplaced.length ? '\n' + esc('Not in any drawer, so not made: ' + m.unplaced.join(', ') + '.') : '');
       $('mk3mf').disabled = !plates; $('mkZip').disabled = !m.rows.length;
       $('mkDxf').hidden = DR.plate !== 'laser';
       S.views.make = { fit: true };
@@ -3039,11 +3133,11 @@
 
   try { var stored = localStorage.getItem('tooltrace.v2'); if (stored) load(JSON.parse(stored)); } catch (e) { /* storage unavailable or corrupt */ }
   syncLayoutInputs(); renderLib(); describeLayout(); layoutSnapshot(); setPhase('drawer');
-  cleanToolBins();
+  cleanToolBins(); drawerUI();
   save(); // also syncs: older data's layout in L becomes the drawer's first tool bin
   TT.app = {
     S: S, L: L, C: C, runFrom: runFrom, setPhase: setPhase, addItem: addItem, generate: generate, fitGrid: fitGrid,
-    selectShape: selectShape, draw: draw, BPS: BPS, DR: DR, PRJ: PRJ, bpUpdate: bpUpdate, openToolBin: openToolBin, newDesign: newDesign, placeDesign: placeDesign, rotateBin: rotateBin, startPlacing: startPlacing, binsChanged: binsChanged, renderMake: renderMake,
+    selectShape: selectShape, draw: draw, BPS: BPS, DR: DR, PRJ: PRJ, switchDrawer: switchDrawer, addDrawer: addDrawer, stashDrawer: stashDrawer, bpUpdate: bpUpdate, openToolBin: openToolBin, newDesign: newDesign, placeDesign: placeDesign, rotateBin: rotateBin, startPlacing: startPlacing, binsChanged: binsChanged, renderMake: renderMake,
     // For the tutorial: copy the bin, and put a copy back (also removes library shapes by id).
     layoutState: function () { return JSON.parse(JSON.stringify(L)); },
     restore: function (state, dropIds) {

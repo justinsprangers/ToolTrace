@@ -7,7 +7,8 @@ var TT = window.TT = window.TT || {};
   // Shelf packing. items: [{w, h, ...}] (footprints, mm); bed: square bed size (mm).
   // Returns {plates: [[{item, x, y, rot}]], tooBig: [item]}; x, y = footprint center on the plate.
   TT.packPlates = function (items, bed, gap, margin) {
-    gap = gap || 4; margin = margin || 3;
+    // 2 mm edge margin: with 3 a 6-unit bin (251.5 mm) didn't fit a 256 mm bed.
+    gap = gap || 4; margin = margin || 2;
     var B = bed - 2 * margin, plates = [], tooBig = [];
     var order = items.slice().sort(function (a, b) { return Math.max(b.w, b.h) * Math.min(b.w, b.h) - Math.max(a.w, a.h) * Math.min(a.w, a.h); });
     function tryPlate(pl, it) {
@@ -30,7 +31,11 @@ var TT = window.TT = window.TT || {};
       return false;
     }
     order.forEach(function (it) {
-      if (Math.max(it.w, it.h) > B + 1e-6) { tooBig.push(it); return; } // square bed: turning doesn't help
+      var big = Math.max(it.w, it.h);
+      if (big > bed + 1e-6) { tooBig.push(it); return; } // square bed: turning doesn't help
+      // Fits the bed but not inside the margins (e.g. a baseplate piece sized to the full bed):
+      // a plate of its own, centered.
+      if (big > B + 1e-6 || Math.min(it.w, it.h) > B + 1e-6) { plates.push({ shelves: [], out: [{ item: it, x: bed / 2, y: bed / 2, rot: false }] }); return; }
       for (var i = 0; i < plates.length; i++) if (tryPlate(plates[i], it)) return;
       var pl = { shelves: [], out: [] };
       if (tryPlate(pl, it)) plates.push(pl); else tooBig.push(it);

@@ -34,6 +34,9 @@
   .minview { display: block; width: 100%; height: 190px; border-radius: 6px; background: #e7e7e3; margin: 2px 0 8px; cursor: grab; touch-action: none; }
   .phases button.parent { background: #e9ecef; border-color: #adb5bd; }
   header .spacer { flex: 1; }
+  header .drsel { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted, #667); }
+  header .drsel select { font: inherit; color: var(--ink, #111); padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); max-width: 220px; }
+  #drList .shaperow small { margin-left: auto; }
   main { display: grid; grid-template-columns: 370px 1fr; flex: 1; min-height: 0; }
   aside { overflow-y: auto; min-height: 0; border-right: 1px solid var(--line); background: var(--panel); padding: 4px 16px 40px; }
   .panel[hidden] { display: none; }
@@ -170,6 +173,9 @@
     <button class="b primary" id="toolDone" title="Save this tool bin design and go back to Bins">Done ← Bins</button>
   </div>
   <div class="spacer"></div>
+  <label class="drsel" title="The drawer you are working on. A project can hold several; each has its own size, baseplate, bins and checklist, and they share the bin designs.">Drawer
+    <select id="drSel"></select></label>
+  <button class="b" id="drAdd" title="Add another drawer to this project">+ Drawer</button>
   <button class="b" id="tourBtn" title="A guided walk-through of the whole tool">Tutorial</button>
   <button class="b" id="saveProject">Save project</button>
   <button class="b" id="openProject">Open project</button>
@@ -195,6 +201,13 @@
         <button data-mode="none">None</button>
       </div>
       <ul class="tips"><li><b>3D printed</b>: ultralight pieces that fit your bed. <b>Laser-cut</b>: one sheet. <b>None</b>: bins sit loose.</li></ul>
+    </details>
+    <details class="sec" open data-key="drawers"><summary>Drawers in this project</summary>
+      <div class="field"><label>Project name</label><input type="text" id="prjName" placeholder="e.g. Lab tool cabinet"></div>
+      <div id="drList"></div>
+      <div class="btns"><button class="b" id="drDup" title="A copy of this drawer: same size, baseplate and bins">Duplicate drawer</button><button class="b" id="drDel" title="Delete this drawer and the bins placed in it (the designs stay)">Delete drawer</button></div>
+      <ul class="tips"><li>Each drawer has its own size, baseplate, placed bins and Make checklist. Bin designs are shared, so one design can be placed in several drawers.</li>
+        <li>Switch drawers with the <b>Drawer</b> menu at the top; <b>+ Drawer</b> adds one the same size as this one.</li></ul>
     </details>
     <div id="drInfo" class="info"></div>
     <div class="btns"><button class="b primary" id="drNext">Next: baseplate →</button></div>
@@ -578,16 +591,16 @@
   <table><tr><td><kbd>G</kbd></td><td>Generate model</td></tr></table>
 </dialog>
 <!-- ?v= makes browsers (and GitHub Pages' cache) fetch new scripts with a new page; bump it on every change. -->
-<script src="js/earcut.js?v=10"></script>
-<script src="js/vision.js?v=10"></script>
-<script src="js/grid.js?v=10"></script>
-<script src="js/gridfinity.js?v=10"></script>
-<script src="js/baseplate.js?v=10"></script>
-<script src="js/zip.js?v=10"></script>
-<script src="js/make.js?v=10"></script>
-<script src="js/preview3d.js?v=10"></script>
-<script src="js/bins.js?v=10"></script>
-<script src="js/app.js?v=10"></script>
-<script src="js/tour.js?v=10"></script>
+<script src="js/earcut.js?v=14"></script>
+<script src="js/vision.js?v=14"></script>
+<script src="js/grid.js?v=14"></script>
+<script src="js/gridfinity.js?v=14"></script>
+<script src="js/baseplate.js?v=14"></script>
+<script src="js/zip.js?v=14"></script>
+<script src="js/make.js?v=14"></script>
+<script src="js/preview3d.js?v=14"></script>
+<script src="js/bins.js?v=14"></script>
+<script src="js/app.js?v=14"></script>
+<script src="js/tour.js?v=14"></script>
 </body>
 </html>

@@ -4,7 +4,13 @@ Fit any drawer or shelf with Gridfinity, start to finish: measure the space, mak
 
 Tabs at the top: **1 Drawer → 2 Baseplate → 3 Bins → 4 Make**. Bins with tool-shaped pockets have their own steps, **Tool bin: Capture · Layout · Generate**. New to it? Press **Tutorial** (top right; it also opens by itself the first time). It walks through every step and can load a built-in sample photo. Arrow keys or Enter go forward and back, and Esc ends it.
 
-One project = one drawer. It's saved in your browser automatically; **Save project / Open project** back it up or move it (drawer, baseplate, bins, tool library and checklist in one `.json` file). Older project files open as a tool bin design in the current drawer; drawers saved before bin designs existed turn each bin into a design plus one placed copy.
+A project holds one or more drawers and the bin designs they share. It's saved in your browser automatically; **Save project / Open project** back it up or move it (every drawer, the designs, the tool library and the checklists in one `.json` file). Older project files open as a project with one drawer, or as a tool bin design if they predate projects; drawers saved before bin designs existed turn each bin into a design plus one placed copy.
+
+## Drawers
+- The **Drawer** menu (top right) switches between the drawers in the project; **+ Drawer** adds one the same size as the current one.
+- Each drawer has its own size, baseplate, placed bins and Make checklist. Bin designs are shared: place the same design in as many drawers as you like, and editing it changes every copy in every drawer.
+- On the Drawer tab, **Drawers in this project** lists them all (click one to switch), sets the **project name** (used for the saved file), and has **Duplicate drawer** (same size, baseplate and bins) and **Delete drawer** (its bins go; the designs stay).
+- The design list shows how many copies are in this drawer and how many in other drawers. Make works on the current drawer; it only reports a design as "not in any drawer" when no drawer uses it.
 
 ## Drawer
 - **Inside width × depth × height** (mm or inches), measured at the narrowest point. Height is from the floor to whatever is above when the drawer closes.

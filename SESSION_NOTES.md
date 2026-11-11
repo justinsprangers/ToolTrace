@@ -23,6 +23,7 @@
 - STEP export skipped: a faceted STEP from triangle meshes gives no benefit over 3MF.
 
 ## Log
+- 2026-11-10: Multiple drawers per project (project file v5, Drawer menu, Drawers section, tutorial step). Plate packer: 2 mm edge margin, and a piece that fits the bed but not the margins gets its own centered plate (a 6-unit bin and full-bed baseplate pieces were flagged "bigger than the bed" on a 256 mm bed). Tested: switch, reload, save/open round trip, v4 file, delete drawer, delete design across drawers, Make per drawer, tutorial.
 - 2026-11-10: Dovetail joints between split pieces (Generate → Dovetail joints). Not yet printed.
 - 2026-11-07: Removed the filament-color option at the user's request (not what they wanted); US spelling throughout.
 - 2026-11-07: Baseplate styles (standard, magnet), bin presets, magnet holes, walls, half dividers, simple-shape pockets, live design 3D preview, drawer 3D view, 3MF downloads everywhere. Mesh checks pass for every option combination; scripted UI tests and the tutorial pass on the user's real data.
